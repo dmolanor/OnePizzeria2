@@ -13,7 +13,7 @@ from typing_extensions import TypedDict
 
 from .models import ChatState, Order, ProductDetails
 from .prompts import CustomerServicePrompts
-from .supabase import SupabaseService
+from .tools import SupabaseService
 
 
 class Workflow:

@@ -144,7 +144,7 @@ class ChatStateManager:
             # Build the ChatState
             from langchain_core.messages import HumanMessage
 
-            from .state import ChatState
+            from .models import ChatState
 
             # Get conversation history as LangChain messages
             historical_messages = context.get_messages_for_llm()
@@ -178,7 +178,7 @@ class ChatStateManager:
             # Return minimal state on error
             from langchain_core.messages import HumanMessage
 
-            from .state import ChatState
+            from .models import ChatState
             
             return ChatState(
                 user_id=user_id,
