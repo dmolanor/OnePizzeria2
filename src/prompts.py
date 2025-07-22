@@ -49,12 +49,6 @@ class CustomerServicePrompts:
                 Para mayor contexto, dada una situación donde un mensaje por si solo no tenga significado en las categorías, el historial de los últimos 3 mensajes chat es: {" ".join(msg.content for msg in message[-4:-1])}
                 """
 
-    TOOLS_EXECUTION_SYSTEM = """Vas a recibir """
-    
-    @staticmethod
-    def tools_execution_user(intent: str, action: str) -> str:
-        return f"""Por favor, ejecuta las herramientas necesarias para {intent} con la acción {action}."""    
-    
     # Tool extraction prompts
     PERSONAL_INFORMATION_EXTRACTION_SYSTEM = """You are a tech researcher. Extract specific tool, library, platform, or service names from articles.
                             Focus on actual products/tools that developers can use, not general concepts or features."""
