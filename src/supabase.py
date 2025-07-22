@@ -4,7 +4,7 @@ from supabase import Client, create_client
 
 # PEDIDOS
 
-class SupabaseClient:
+class SupabaseService:
     def __init__(self):
         url: str = os.environ.get("SUPABASE_URL")
         api_key: str = os.environ.get("SUPABASE_KEY")
