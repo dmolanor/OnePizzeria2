@@ -97,7 +97,19 @@ class Workflow:
     
     
     def _send_response_step(self, state: ChatState) -> Dict[str, Any]:
-        return {"response": []}
+        
+        messages = [
+            SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
+            HumanMessage(content=self.prompts.message_splitting_user(state.messages))
+        ]
+        
+        try:
+            response = self.llm.invoke(messages)
+            return {"response": response.content}
+        except Exception as e:
+            print(e)
+            return {"response": []}
+
     
     def should_use_tools(self, state: ChatState) -> bool:
         if state.saludo == 1:
