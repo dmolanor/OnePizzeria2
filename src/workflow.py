@@ -50,7 +50,7 @@ class Workflow:
         
         messages = [
             SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
-            HumanMessage(content=self.prompts.message_splitting_user(state["messages"][-1].content))
+            HumanMessage(content=self.prompts.message_splitting_user(state["messages"]))
         ]
         
         try:
