@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from ..config import supabase
+from config import supabase
 
 logger = logging.getLogger(__name__)
 

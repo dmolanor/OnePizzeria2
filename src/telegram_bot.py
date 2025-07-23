@@ -3,9 +3,13 @@ import signal
 import sys
 from typing import Any, Dict, Optional
 
+from langchain_core.messages import HumanMessage
 from telegram import Update
 from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
+
+from src.state import ChatState
+from src.workflow import Workflow
 
 # Set higher logging level for httpx to avoid all GET and POST requests being logged
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -26,6 +30,7 @@ class TelegramBot:
             .concurrent_updates(True)
             .build()
         )
+        self.workflow = Workflow()  # Initialize workflow
         self._setup_handlers()
         self._setup_shutdown_handlers()
 
@@ -84,21 +89,37 @@ class TelegramBot:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages."""
         try:
-            # Get the user's message
+            # Get the user's message and info
             message_text = update.message.text
-            user_id = update.effective_user.id
-            user_name = update.effective_user.first_name
+            user = update.effective_user
+            user_id = str(user.id)  # Convert to string as workflow expects string
+            user_name = user.first_name
             
             logger.info(f"Received message from {user_name} ({user_id}): {message_text}")
             
-            # Here you can add your custom logic to process the message
-            # For example, calling an AI service, database operations, etc.
-            response = f"Recibí tu mensaje: {message_text}\n\n¿Hay algo más en lo que pueda ayudarte?"
+            # Process message through workflow asynchronously
+            initial_state = {"messages": [HumanMessage(content=message_text)], "user_id": user_id}
+            logger.info(f"Initial state created: {initial_state}")
+            
+            logger.info("Starting workflow execution...")
+            response_state = await self.workflow.workflow.ainvoke(initial_state)
+            logger.info(f"Workflow completed. Response state: {response_state}")
+            
+            # Get the last message from the response state
+            if response_state and response_state.get("messages"):
+                response = response_state["messages"][-1].content
+                logger.info(f"Extracted response: {response}")
+            else:
+                response = "Lo siento, no pude procesar tu mensaje. ¿Podrías intentar de nuevo?"
+                logger.warning("No messages found in response state")
             
             await update.message.reply_text(response)
             
         except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
             logger.error(f"Error processing message: {str(e)}")
+            logger.error(f"Full traceback:\n{error_traceback}")
             await update.message.reply_text(
                 "Lo siento, hubo un error procesando tu mensaje. Por favor, intenta de nuevo."
             )

@@ -1,4 +1,6 @@
-from typing import Sequence, Dict, Any
+from typing import Any, Dict, Sequence
+
+
 class CustomerServicePrompts:
     """Collection of prompts for analyzing developer tools and technologies"""
 
@@ -7,110 +9,159 @@ class CustomerServicePrompts:
                             Tu tarea es dividir un mensaje del usuario en una lista de mensajes, cada uno perteneciente a una intención y acción diferente, y retornar una lista de diccionarios.
                             """
 
-    @staticmethod
-    def message_splitting_user(message: Sequence) -> str:
-        return f"""Mensaje del usuario: {message[-1].content}
-
-                Divide el mensaje en una lista de mensajes, cada uno perteneciente a una intención y acción diferente.
-                Si el mensaje pertenece a más de una intención y acción, divídelo en tantos mensajes como sea necesario.
-                Cada fragmento puede pertenecer a una de las siguientes categorías:
-                - saludo
-                - registro_datos_personales
-                - registro_direccion
-                - consulta_menu
-                - seleccion_productos
-                - confirmacion
-                - finalizacion
-                - general (si el mensaje no pertenece a ninguna de las categorías anteriores)
-
-                Devuelve la lista de mensajes en formato JSON con la categoría de intensión a la que pertenece y el fragmento del mensaje correspondiente. 
-                Este fragmento debe resumir lo que desea el usuario, sin perder información relevante. Si un mensaje recibe múltiples fragmentos con la misma intención, separalos en diferentes mensajes y diccionarios.
-                Ejemplo:
-                - mensaje: "Hola, quiero pedir una pizza de pepperoni para la direccion Calle 10 #20-30."
-                    return: [
-                        {"intent": "saludo", "action": "saludar"},
-                        {"intent": "registro_direccion", "action": "Calle 10 #20-30"},
-                        {"intent": "seleccion_productos", "action": "pedido_pizza_pepperoni"},
-                    ]
-                - mensaje: "Necesito actualizar mi número de teléfono."
-                    return: [
-                        {"intent": "registro_datos_personales", "action": "actualizar_telefono"},
-                    ]
-                - mensaje: "¿Qué ingredientes tiene la pizza hawaiana?"
-                    return: [
-                        {"intent": "consulta_menu", "action": "ingredientes_pizza_hawaiana"},
-                    ]
-                - mensaje: "Quiero una pizza de pepperoni y una Coca Cola cero."
-                    return: [
-                        {"intent": "seleccion_productos", "action": "pedido_pizza_pepperoni"},
-                        {"intent": "seleccion_productos", "action": "pedido_coca_cola_zero"},
-                    ]
-                
-                Para mayor contexto, dada una situación donde un mensaje por si solo no tenga significado en las categorías, el historial de los últimos 3 mensajes chat es: {" ".join(msg.content for msg in message[-4:-1])}
-                """
+    def message_splitting_user(self, messages, order_states=None, customer_info=None, active_order=None):
+        current_message = messages[-1].content if messages else ""
+        
+        # Build context from recent conversation
+        conversation_context = ""
+        if len(messages) > 1:
+            recent_messages = messages[-4:]  # Last 4 messages for context
+            conversation_context = "\n".join([
+                f"- {msg.content}" for msg in recent_messages[:-1] 
+                if hasattr(msg, 'content') and msg.content
+            ])
+        
+        # Build current state context
+        state_context = ""
+        if order_states:
+            completed_states = [state for state, value in order_states.items() if value == 2]
+            in_progress_states = [state for state, value in order_states.items() if value == 1]
+            
+            if completed_states:
+                state_context += f"\nEstados ya completados: {', '.join(completed_states)}"
+            if in_progress_states:
+                state_context += f"\nEstados en progreso: {', '.join(in_progress_states)}"
+        
+        # Build customer context
+        customer_context = ""
+        if customer_info:
+            customer_context = f"\nCliente registrado: {customer_info.get('nombre_completo', 'N/A')}"
+            if customer_info.get('direccion'):
+                customer_context += f", Dirección: {customer_info.get('direccion')}"
+        
+        # Build order context
+        order_context = ""
+        if active_order and active_order.get('order_items'):
+            items_count = len(active_order['order_items'])
+            total = active_order.get('order_total', 0)
+            order_context = f"\nPedido actual: {items_count} productos, Total: ${total}"
+        
+        return f"""
+            MENSAJE ACTUAL DEL USUARIO: "{current_message}"
+            
+            CONTEXTO DE LA CONVERSACIÓN:
+            {conversation_context if conversation_context else "No hay mensajes previos"}
+            
+            ESTADO ACTUAL DEL PROCESO:
+            {state_context if state_context else "Ningún estado completado aún"}
+            
+            INFORMACIÓN DEL CLIENTE:
+            {customer_context if customer_context else "Cliente no registrado"}
+            
+            PEDIDO ACTUAL:
+            {order_context if order_context else "No hay productos en el pedido"}
+            
+            INSTRUCCIONES PARA CLASIFICACIÓN:
+            
+            Analiza el mensaje del usuario considerando TODO el contexto anterior y clasifica su intención en una de las siguientes categorías:
+            
+            - **saludo**: Saludos iniciales, presentaciones ("Hola", "Buenos días", etc.)
+            - **registro_datos_personales**: Proporciona nombre completo y/o teléfono
+            - **registro_direccion**: Proporciona o confirma dirección de entrega
+            - **consulta_menu**: Pregunta sobre productos, precios, ingredientes, opciones disponibles
+            - **seleccion_productos**: Solicita productos específicos ("quiero una pizza", "me das una coca cola")
+            - **confirmacion**: Confirma el pedido actual ("sí, está correcto", "confirmo", "está bien")
+            - **finalizacion**: Proporciona método de pago o finaliza el pedido
+            - **general**: Si no encaja en ninguna categoría anterior
+            
+            REGLAS IMPORTANTES:
+            1. Si un estado ya está COMPLETADO (valor 2), NO lo classifiques de nuevo a menos que el usuario explícitamente quiera cambiarlo
+            2. Si el mensaje es ambiguo, usa el contexto de la conversación para inferir la intención
+            3. Si el usuario dice "sí", "correcto", "está bien" después de mostrar productos, clasifícalo como "confirmacion"
+            4. Si el usuario menciona productos después de ya tener productos, puede ser "seleccion_productos" (agregar más) o "confirmacion" (confirmar los actuales)
+            
+            EJEMPLOS CON CONTEXTO:
+            
+            Ejemplo 1:
+            - Contexto: Cliente ya tiene pizza en el pedido
+            - Mensaje: "Sí, está correcto"
+            - Clasificación: {{"intent": "confirmacion", "action": "confirma_pedido_actual"}}
+            
+            Ejemplo 2:
+            - Contexto: No hay productos en el pedido
+            - Mensaje: "Quiero una pizza"
+            - Clasificación: {{"intent": "seleccion_productos", "action": "solicita_pizza"}}
+            
+            Ejemplo 3:
+            - Contexto: Cliente ya registrado con dirección
+            - Mensaje: "La dirección está bien"
+            - Clasificación: {{"intent": "confirmacion", "action": "confirma_direccion"}}
+            
+            Devuelve la respuesta en formato JSON como lista de diccionarios:
+            [
+                {{"intent": "categoria", "action": "descripcion_de_la_accion"}}
+            ]
+            
+            Si el mensaje tiene múltiples intenciones, sepáralas en diferentes diccionarios.
+            """
 
     TOOLS_EXECUTION_SYSTEM = """
-Eres un agente de soporte para una pizzería. Tu tarea es recibir una lista de intenciones y acciones previamente extraídas del mensaje del cliente, y ejecutar la herramienta adecuada para cada una de ellas.
+    Eres un agente especializado en ejecutar herramientas para el proceso de pedidos de pizzería.
 
-IMPORTANTE:
-- Solo puedes ejecutar UNA herramienta por mensaje de intención.
-- Si ya ejecutaste una herramienta, no la repitas.
-- NO respondas al cliente. Solo ejecuta las herramientas necesarias.
-- Cada ejecución debe corresponder claramente a una intención específica.
-- Si no puedes ejecutar una intención porque falta información clave, ignórala (otro nodo se encargará de completarla más tarde).
-- No combines acciones. Ejecuta una por vez.
-
-Estas son las herramientas disponibles:
-
-— HERRAMIENTAS DE CLIENTE —
-1. `get_customer(user_id)`  
-   Obtiene los datos del cliente según el ID.
-
-2. `create_customer(nombre, telefono, correo)`  
-   Registra un nuevo cliente.
-
-3. `update_customer(nombre, telefono, correo)`  
-   Actualiza la información de un cliente.
-
-4. `update_customer_address(direccion, ciudad)`  
-   Actualiza la dirección del cliente.
-
-— HERRAMIENTAS DE MENÚ —
-5. `search_menu(query)`  
-   Busca productos según ingredientes o preferencias.
-
-6. `send_full_menu()`  
-   Envía el menú completo como imagen.
-
-— HERRAMIENTAS DE PEDIDO —
-7. `get_active_order()`  
-   Verifica si el cliente ya tiene un pedido activo.
-
-8. `create_or_update_order(items)`  
-   Crea o actualiza un pedido con los productos indicados.
-
-9. `finalize_order()`  
-   Finaliza el pedido actual.
-
-Para cada fragmento que recibas, analiza su intención y ejecuta solo la herramienta que corresponde. No expliques nada. Solo llama la herramienta correcta con los argumentos necesarios.
-
-Ejemplo de fragmentos:
-  {"intent": "registro_direccion", "action": "Calle 10 #20-30"},
-  {"intent": "consulta_menu", "action": "ingredientes_pizza_hawaiana"},
-  {"intent": "seleccion_productos", "action": "pedido_pizza_pepperoni"} 
-
-Tu tarea sería:
-- Llamar a `update_customer_address` con la dirección.
-- Llamar a `search_menu` con la pizza hawaiana.
-- Llamar a `create_or_update_order` con el ítem "pizza pepperoni".
-
-No hagas nada más. No respondas. No combines herramientas. Solo ejecuta.
-
-"""
+    INSTRUCCIONES PARA USO DE HERRAMIENTAS:
     
-    @staticmethod
-    def tools_execution_user(section: Dict[str, str]) -> str:
-        return f"""Por favor, ejecuta las herramientas necesarias para {section["intent"]} con la acción {section["action"]}."""    
+    1. ANALIZA el intent y action del usuario para determinar qué herramienta necesitas
+    2. EXTRAE la información específica del mensaje del usuario
+    3. USA las herramientas con los argumentos CORRECTOS basados en la información del usuario
+    
+    MAPEO DE INTENTS A HERRAMIENTAS:
+    
+    REGISTRO_DATOS_PERSONALES:
+    - Si el usuario da nombre Y teléfono: usa "create_client" 
+    - Argumentos: id="user_id", nombre_completo="nombre", telefono="numero", direccion="direccion" (opcional)
+    
+    REGISTRO_DIRECCION:
+    - Si el usuario da dirección: usa "update_client"
+    - Argumentos: id="user_id", direccion="direccion_completa"
+    
+    SELECCION_PRODUCTOS:
+    - Si menciona pizza: usa "get_pizza_by_name" con name="nombre_pizza_exacto"
+    - Si menciona bebida: usa "get_beverage_by_name" con name="nombre_bebida_exacto"
+    
+    CONFIRMACION:
+    - Si el usuario confirma su pedido: usa "create_order"
+    - Argumentos: cliente_id="user_id", items=[lista_productos_del_pedido_actual], total=total_calculado
+    - IMPORTANTE: Solo usar create_order cuando el usuario CONFIRME explícitamente su pedido
+    
+    EJEMPLOS DE USO:
+    
+    Para selección: get_pizza_by_name(name="diabola")
+    Para confirmación: create_order(cliente_id="7315133184", items=[{"pizza": "diabola", "tamaño": "medium", "precio": 45000}], total=45000.0)
+    
+    RECUERDA: 
+    - Extrae nombres exactos de productos del texto del usuario
+    - Solo confirma pedidos cuando el usuario diga "confirmo", "está bien", "correcto", etc.
+    - Usa argumentos específicos, nunca argumentos vacíos {{}}
+    """
+
+    def tools_execution_user(self, section):
+        return f"""
+        El usuario tiene este intent: {section["intent"]}
+        Con esta acción específica: {section["action"]}
+        
+        Basándome en esto, determina qué herramientas usar y con qué argumentos específicos.
+        
+        INFORMACIÓN DEL CONTEXTO:
+        - Intent: {section["intent"]}
+        - Action: {section["action"]}
+        
+        Analiza la acción del usuario y extrae los datos específicos para llamar la herramienta correcta.
+        
+        RECUERDA: 
+        - Usar argumentos reales extraídos del action del usuario
+        - NO usar argumentos vacíos
+        - Si falta información crítica, no uses herramientas
+        """
     
     # Tool extraction prompts
     PERSONAL_INFORMATION_EXTRACTION_SYSTEM = """You are a tech researcher. Extract specific tool, library, platform, or service names from articles.

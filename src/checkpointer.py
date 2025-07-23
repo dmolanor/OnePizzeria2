@@ -11,7 +11,7 @@ from langgraph.checkpoint.base import (BaseCheckpointSaver, Checkpoint,
                                        CheckpointMetadata)
 
 from .memory import ConversationContext, memory
-from .models import ChatState
+from .state import ChatState
 
 logger = logging.getLogger(__name__)
 
