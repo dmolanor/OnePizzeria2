@@ -3,19 +3,39 @@ import re
 from typing import Annotated, Any, Dict, Literal
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
-from telegram import Update
 from typing_extensions import TypedDict
 
 from .checkpointer import state_manager
 from .models import ChatState, Order, ProductDetails
 from .prompts import CustomerServicePrompts
 from .tools import SupabaseService
+
+
+class ConversationState(TypedDict):
+    """Estado extendido que incluye el progreso de la conversación"""
+    user_id: str
+    messages: Annotated[list, add_messages]
+    customer: Dict[str, Any]
+    active_order: Dict[str, Any]
+    response: str
+    
+    # Estados del flujo de conversación
+    has_greeted: bool
+    has_customer_data: bool
+    has_address: bool
+    has_seen_menu: bool
+    has_selected_products: bool
+    needs_confirmation: bool
+    is_finalized: bool
+    
+    # Próximo paso sugerido
+    next_step: str
 
 
 class Workflow:
@@ -29,139 +49,260 @@ class Workflow:
         self.workflow = self._build_workflow()
     
     def _build_workflow(self):
-        graph = StateGraph(ChatState)
-        graph.add_node("detect_intent", self.detect_user_intent_step)
-        graph.add_node("retrieve_data", self.retrieve_data_step)
-        graph.add_node("tools", ToolNode(self.supabase.ALL_TOOLS))
-        graph.add_node("send_response", self.send_response_step)
-        graph.set_entry_point("extract_tools")
-        graph.add_edge("detect_intent", "retrieve_data")
-        graph.add_conditional_edges("retrieve_data", 
+        """Build workflow following ORDER_GUIDE flow"""
+        graph = StateGraph(ConversationState)
+        
+        # Add nodes
+        graph.add_node("analyze_message", self.analyze_message_step)
+        graph.add_node("handle_tools", ToolNode(self.supabase.ALL_TOOLS))
+        graph.add_node("generate_response", self.generate_response_step)
+        
+        # Set entry point
+        graph.set_entry_point("analyze_message")
+        
+        # Add edges
+        graph.add_conditional_edges(
+            "analyze_message",
                                     self.should_use_tools,
                                     {
-                                        True: "tools",
-                                        False: "send_response"
-                                    })
-        graph.add_edge("tools", "retrieve_data")
-        graph.add_edge("send_response", END)
+                "tools": "handle_tools",
+                "response": "generate_response"
+            }
+        )
+        graph.add_edge("handle_tools", "generate_response")
+        graph.add_edge("generate_response", END)
+        
         return graph.compile()
-        
     
-    async def detect_user_intent_step(self, update: Update, state: ChatState) -> Dict[str, Any]:
-        print(f"Dividing message and identifying intent: {state["messages"][-1].content}")
+    def analyze_message_step(self, state: ConversationState) -> Dict[str, Any]:
+        """Analiza el mensaje y determina el estado de la conversación"""
+        print(f"Analyzing message: {state['messages'][-1].content}")
         
-        user = update.effective_user
-        new_message = state["messages"][-1].content if state["messages"] else ""
+        user_message = state["messages"][-1].content
         
-        complete_state = await state_manager.load_state_for_user(user.id, new_message)
+        # Determinar estado actual de la conversación
+        conversation_context = self._get_conversation_context(state)
 
+        # Crear prompt según el estado actual
+        system_prompt = self._create_system_prompt(conversation_context)
         
         messages = [
-            SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
-            HumanMessage(content=self.prompts.message_splitting_user(state["messages"]))
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message)
         ]
         
+        # Usar LLM con herramientas
+        llm_with_tools = self.llm.bind_tools(self.supabase.ALL_TOOLS)
+        response = llm_with_tools.invoke(messages)
+        
+        return {"messages": [response]}
+    
+    def _get_conversation_context(self, state: ConversationState) -> str:
+        """Determina en qué fase de la conversación estamos"""
+        if not state.get("has_greeted", False):
+            return "saludo"
+        elif not state.get("has_customer_data", False):
+            return "registro_datos_personales"
+        elif not state.get("has_address", False) and state.get("has_selected_products", False):
+            return "registro_direccion"
+        elif not state.get("has_seen_menu", False):
+            return "consulta_menu"
+        elif not state.get("has_selected_products", False):
+            return "seleccion_productos"
+        elif state.get("needs_confirmation", False):
+            return "confirmacion"
+        elif not state.get("is_finalized", False):
+            return "finalizacion"
+        else:
+            return "general"
+    
+    def _create_system_prompt(self, context: str) -> str:
+        """Crear prompt específico según el contexto de la conversación"""
+        base_prompt = """Eres Juan, empleado de One Pizzeria en Bogotá, Colombia. Eres amigable y profesional.
+        
+INSTRUCCIONES IMPORTANTES:
+- Responde de forma natural, sin emojis excesivos ni plantillas
+- Usa las herramientas disponibles para obtener información real
+- Calcula precios correctamente incluyendo adiciones y bordes
+- Mantén el flujo de conversación según ORDER_GUIDE
+
+CONTEXTO ACTUAL: {context}"""
+
+        context_instructions = {
+            "saludo": """
+FASE: SALUDO INICIAL
+- Saluda cordialmente al cliente
+- Pregunta en qué puedes ayudarle
+- Si menciona productos, guarda la información pero pregunta primero por sus datos
+- Usa get_customer para verificar si ya está registrado""",
+            
+            "registro_datos_personales": """
+FASE: REGISTRO DE DATOS PERSONALES
+- Solicita nombre completo, teléfono y correo (correo opcional)
+- Usa create_customer para registrar cliente nuevo
+- Usa update_customer para actualizar datos existentes
+- Confirma los datos registrados""",
+            
+            "registro_direccion": """
+FASE: REGISTRO DE DIRECCIÓN
+- Solicita dirección completa de entrega
+- Pregunta método de pago (efectivo, tarjeta, transferencia)
+- Usa update_customer para guardar la dirección""",
+            
+            "consulta_menu": """
+FASE: CONSULTA DE MENÚ
+- Usa get_full_menu para mostrar todas las opciones
+- Usa search_menu para consultas específicas
+- Explica opciones de tamaños, adiciones y bordes disponibles
+- Usa get_pizza_additions para mostrar extras disponibles""",
+            
+            "seleccion_productos": """
+FASE: SELECCIÓN DE PRODUCTOS
+- Ayuda al cliente a elegir productos
+- Usa calculate_pizza_price para calcular precios con adiciones y bordes
+- Usa create_or_update_order para agregar productos al pedido
+- Muestra el total actualizado después de cada adición""",
+            
+            "confirmacion": """
+FASE: CONFIRMACIÓN DE PEDIDO
+- Muestra resumen completo del pedido con precios
+- Confirma dirección de entrega y método de pago
+- Pregunta si desea hacer cambios o confirmar
+- Si confirma, procede a finalización""",
+            
+            "finalizacion": """
+FASE: FINALIZACIÓN
+- Usa finalize_order para completar el pedido
+- Proporciona tiempo estimado de entrega
+- Agradece al cliente""",
+            
+            "general": """
+FASE: CONSULTA GENERAL
+- Responde preguntas sobre productos, precios, tiempos
+- Mantén el contexto del pedido actual si existe"""
+        }
+        
+        instruction = context_instructions.get(context, context_instructions["general"])
+        return base_prompt.format(context=context) + instruction
+    
+    def should_use_tools(self, state: ConversationState) -> Literal["tools", "response"]:
+        """Decide si usar herramientas basado en el último mensaje AI"""
+        last_message = state["messages"][-1]
+        
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            print(f"🔧 Using tools: {[tc['name'] for tc in last_message.tool_calls]}")
+            return "tools"
+        else:
+            print("📝 Generating direct response")
+            return "response"
+    
+    def generate_response_step(self, state: ConversationState) -> Dict[str, Any]:
+        """Genera respuesta final y determina próximo paso"""
+        messages = state["messages"]
+        
+        # Obtener respuesta del LLM
+        last_message = messages[-1]
+        
+        if hasattr(last_message, "content") and last_message.content:
+            response_content = last_message.content
+        else:
+            # Generar respuesta basada en herramientas usadas
+            context = self._get_conversation_context(state)
+            system_msg = SystemMessage(content=f"""Basándote en los resultados de las herramientas usadas, 
+            genera una respuesta natural y útil para el cliente de One Pizzeria.
+            Contexto actual: {context}
+            
+            IMPORTANTE: Además de responder, guía al cliente hacia el siguiente paso apropiado:
+            - Si es saludo -> pide datos personales
+            - Si registró datos -> muestra menú o toma pedido
+            - Si seleccionó productos -> pide dirección y método de pago
+            - Si tiene todo -> confirma pedido
+            - Si confirmó -> finaliza
+            """)
+            response = self.llm.invoke([system_msg] + messages)
+            response_content = response.content
+        
+        # Actualizar estado de conversación
+        updated_state = self._update_conversation_state(state, response_content)
+        
+        return {
+            "response": response_content,
+            **updated_state
+        }
+    
+    def _update_conversation_state(self, state: ConversationState, response: str) -> Dict[str, Any]:
+        """Actualiza el estado de la conversación basado en la respuesta"""
+        updates = {}
+        
+        # Analizar respuesta para determinar cambios de estado
+        response_lower = response.lower()
+        
+        if "bienvenido" in response_lower or "hola" in response_lower:
+            updates["has_greeted"] = True
+            
+        if "registrado" in response_lower or "datos" in response_lower:
+            updates["has_customer_data"] = True
+            
+        if "menú" in response_lower or "pizzas" in response_lower:
+            updates["has_seen_menu"] = True
+            
+        if "pedido" in response_lower and "total" in response_lower:
+            updates["has_selected_products"] = True
+            updates["needs_confirmation"] = True
+            
+        if "confirmado" in response_lower:
+            updates["is_finalized"] = True
+            
+        # Determinar próximo paso
+        if not updates.get("has_customer_data", state.get("has_customer_data", False)):
+            updates["next_step"] = "registro_datos_personales"
+        elif not updates.get("has_seen_menu", state.get("has_seen_menu", False)):
+            updates["next_step"] = "consulta_menu"
+        elif not updates.get("has_selected_products", state.get("has_selected_products", False)):
+            updates["next_step"] = "seleccion_productos"
+        elif updates.get("needs_confirmation", state.get("needs_confirmation", False)):
+            updates["next_step"] = "confirmacion"
+        elif not updates.get("is_finalized", state.get("is_finalized", False)):
+            updates["next_step"] = "finalizacion"
+        else:
+            updates["next_step"] = "completado"
+            
+        return updates
+    
+    async def run(self, user_message: str, user_id: str = "test_user") -> str:
+        """Run the workflow with conversation state management"""
         try:
-            response = self.llm.invoke(messages)
-            print(f"Divided message response: {response.content}")
-            saludo = 0
-            registro_datos_personales = 0
-            registro_direccion = 0
-            consulta_menu = 0
-            seleccion_productos = 0
-            confirmacion = 0
-            finalizacion = 0
+            # Cargar estado con memoria
+            base_state = await state_manager.load_state_for_user(user_id, user_message)
             
-            raw = response.content
-            if not raw.strip():
-                raise ValueError("Response content is empty or whitespace")
+            # Convertir a ConversationState con estados adicionales
+            conversation_state = ConversationState(
+                user_id=base_state["user_id"],
+                messages=base_state["messages"],
+                customer=base_state.get("customer", {}),
+                active_order=base_state.get("active_order", {}),
+                response="",
+                has_greeted=bool(base_state.get("customer", {})),
+                has_customer_data=bool(base_state.get("customer", {}).get("nombre")),
+                has_address=bool(base_state.get("customer", {}).get("direccion")),
+                has_seen_menu=False,  # Se determinará en el análisis
+                has_selected_products=bool(base_state.get("active_order", {}).get("pedido")),
+                needs_confirmation=False,
+                is_finalized=False,
+                next_step="saludo"
+            )
             
-            if raw.startswith("```json") or raw.startswith("```"):
-                raw = re.sub(r"^```(?:json)?\n?", "", raw)
-                raw = re.sub(r"\n?```$", "", raw)
+            # Ejecutar workflow
+            final_state = self.workflow.invoke(conversation_state)
             
-            divided = json.loads(raw)
-            print(divided)
-            for section in divided:
-                print(section["intent"])
-                if section["intent"] == "saludo":
-                    saludo = 1
-                elif section["intent"] == "registro_datos_personales":
-                    registro_datos_personales = 1
-                elif section["intent"] == "registro_direccion":
-                    registro_direccion = 1
-                elif section["intent"] == "consulta_menu":
-                    consulta_menu = 1
-                elif section["intent"] == "seleccion_productos":
-                    seleccion_productos = 1
-                elif section["intent"] == "confirmacion":
-                    confirmacion = 1
-                elif section["intent"] == "finalizacion":
-                    finalizacion = 1
-                else:
-                    general = 1
-                    
-            return {"divided_message": divided,
-                    "saludo": saludo,
-                    "registro_datos_personales": registro_datos_personales,
-                    "registro_direccion": registro_direccion,
-                    "consulta_menu": consulta_menu,
-                    "seleccion_productos": seleccion_productos,
-                    "confirmacion": confirmacion,
-                    "finalizacion": finalizacion,
-                    "general": general}
+            # Extraer respuesta
+            response = final_state.get("response", "Lo siento, no pude procesar tu mensaje.")
+            
+            # Guardar estado
+            await state_manager.save_state_for_user(final_state, response)
+            
+            return response
             
         except Exception as e:
-            print(e)
-            return {"divided_message": []}
-    
-    
-    def retrieve_data_step(self, state: ChatState) -> Dict[str, Any]:
-        """
-        Placeholder for retrieving data step.
-        """
-        print(f"Retrieving data based on divided messages... {state["divided_message"]}")
-        if len(state["divided_message"]) == 0:
-            print("No divided messages to process.")
-            return {"divided_message": []}
-        
-        section = state["divided_message"].pop()
-
-        response = self.llm.bind_tools(self.supabase.ALL_TOOLS).invoke([self.prompts] + [HumanMessage(content=f"Por favor, ejecuta las herramientas necesarias para {section['intent']} con la acción {section['action']}.")])
-        
-        if hasattr(response, "tool_calls") and response.tool_calls:
-            print(f"🔧 USING TOOLS: {[tc['name'] for tc in response.tool_calls]}")
-        
-        return {"messages": list(state["messages"]) + [response]}
-    
-    
-    def send_response_step(self, state: ChatState) -> Dict[str, Any]:
-        
-        messages = [
-            SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
-            HumanMessage(content=self.prompts.message_splitting_user(state.messages))
-        ]
-        
-        try:
-            response = self.llm.invoke(messages)
-            return {"response": response.content}
-        except Exception as e:
-            print(e)
-            return {"response": []}
-
-    
-    def should_use_tools(self, state: ChatState) -> bool:
-        """
-        Check if the conversation should continue based on the divided messages.
-        """
-        divided_message = state["divided_message"]
-        print(f"aun faltan:   {divided_message}")
-        if not divided_message or divided_message == []:
-            print("No more divided messages to process.")
-            return "END"
-        return "retrieve"
-
-    def run(self, query:str) -> ChatState:
-        initial_state = ChatState(messages=query)
-        final_state = self.workflow.invoke(initial_state)
-        return ChatState(**final_state)
+            print(f"Error in workflow: {e}")
+            return "Lo siento, tuve un problema técnico. ¿Podrías intentar de nuevo?"

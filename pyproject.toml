@@ -1,18 +1,33 @@
 [project]
 name = "newonepizzeria"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "langchain>=0.3.26",
-    "langchain-openai>=0.3.27",
-    "langgraph>=0.5.1",
-    "openai>=1.93.0",
-    "pydantic>=2.11.7",
-    "python-dotenv>=1.1.1",
-    "python-telegram-bot>=22.3",
-    "supabase>=2.16.0",
-    "telegram>=0.0.1",
-    "telethon>=1.40.0",
+description = "OnePizzeria Chatbot"
+authors = [
+    { name = "Diego", email = "diego@example.com" }
 ]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "python-telegram-bot>=20.8",
+    "langchain",
+    "langchain-openai",
+    "langchain-core",
+    "langgraph",
+    "supabase",
+    "python-dotenv",
+    "pydantic"
+]
+requires-python = ">=3.10"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

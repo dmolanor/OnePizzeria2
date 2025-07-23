@@ -1,16 +1,27 @@
 """
- Memory Manager for the pizzeria chatbot.
+Memory Manager for the pizzeria chatbot.
 Implements hybrid approach: key context + recent messages with intelligent cleanup.
+Uses smart_conversation_memory table from Supabase schema.
 """
 
 import json
 import logging
+import os
+# Importar el cliente de Supabase desde config centralizado
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from ..config import supabase
+sys.path.append('..')
+try:
+    from config import supabase
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    supabase = None
+    SUPABASE_AVAILABLE = False
+    print("Warning: Could not import supabase from config, using mock for memory")
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +71,7 @@ class ConversationContext:
         return messages
     
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize context for storage."""
+        """Serialize context for storage in smart_conversation_memory table."""
         return {
             "thread_id": self.thread_id,
             "customer_context": self.customer_context,
@@ -72,16 +83,38 @@ class ConversationContext:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ConversationContext':
-        """Deserialize context from storage."""
+        """Deserialize context from smart_conversation_memory table."""
         context = cls(data["thread_id"])
         context.customer_context = data.get("customer_context", {})
         context.recent_messages = data.get("recent_messages", [])
         context.session_metadata = data.get("session_metadata", {})
         
         if "last_activity" in data:
-            context.last_activity = datetime.fromisoformat(data["last_activity"].replace('Z', '+00:00'))
+            try:
+                # Handle different datetime formats
+                last_activity_str = data["last_activity"]
+                if isinstance(last_activity_str, str):
+                    if last_activity_str.endswith('Z'):
+                        last_activity_str = last_activity_str.replace('Z', '+00:00')
+                    context.last_activity = datetime.fromisoformat(last_activity_str)
+                elif isinstance(last_activity_str, datetime):
+                    context.last_activity = last_activity_str
+            except Exception as e:
+                logger.warning(f"Error parsing last_activity: {e}")
+                context.last_activity = datetime.now(timezone.utc)
+                
         if "created_at" in data:
-            context.created_at = datetime.fromisoformat(data["created_at"].replace('Z', '+00:00'))
+            try:
+                created_at_str = data["created_at"]
+                if isinstance(created_at_str, str):
+                    if created_at_str.endswith('Z'):
+                        created_at_str = created_at_str.replace('Z', '+00:00')
+                    context.created_at = datetime.fromisoformat(created_at_str)
+                elif isinstance(created_at_str, datetime):
+                    context.created_at = created_at_str
+            except Exception as e:
+                logger.warning(f"Error parsing created_at: {e}")
+                context.created_at = datetime.now(timezone.utc)
         
         return context
 
@@ -89,11 +122,11 @@ class ConversationContext:
 class MemoryManager:
     """
     Intelligent memory manager for multi-user conversations.
-    Uses hybrid approach with Supabase for persistent storage.
+    Uses smart_conversation_memory table for persistent storage.
     """
     
     def __init__(self):
-        self.table_name = "conversation_memory"
+        self.table_name = "smart_conversation_memory"  # Usar tabla del esquema real
         self.ttl_days = 7  # Auto-cleanup after 7 days of inactivity
         self.max_message_length = 1000  # Truncate very long messages
         
@@ -117,20 +150,21 @@ class MemoryManager:
                     # Cache expired
                     del self._cache[thread_id]
             
-            # Load from database
-            result = supabase.table(self.table_name).select("*").eq("thread_id", thread_id).limit(1).execute()
+            # Load from database if available
+            if SUPABASE_AVAILABLE and supabase:
+                result = supabase.table(self.table_name).select("*").eq("thread_id", thread_id).limit(1).execute()
+                
+                if result.data:
+                    # Found existing conversation
+                    context = ConversationContext.from_dict(result.data[0])
+                    self._cache[thread_id] = context
+                    logger.info(f"Loaded conversation from DB: {thread_id}, {len(context.recent_messages)} messages")
+                    return context
             
-            if result.data:
-                # Found existing conversation
-                context = ConversationContext.from_dict(result.data[0])
-                self._cache[thread_id] = context
-                logger.info(f"Loaded conversation from DB: {thread_id}, {len(context.recent_messages)} messages")
-                return context
-            else:
-                # Create new conversation
-                context = ConversationContext(thread_id)
-                logger.info(f"Created new conversation: {thread_id}")
-                return context
+            # Create new conversation
+            context = ConversationContext(thread_id)
+            logger.info(f"Created new conversation: {thread_id}")
+            return context
                 
         except Exception as e:
             logger.error(f"Error getting conversation {thread_id}: {e}")
@@ -139,25 +173,36 @@ class MemoryManager:
     
     async def save_conversation(self, context: ConversationContext):
         """
-        Save conversation context to database.
+        Save conversation context to smart_conversation_memory table.
         """
         try:
             # Update cache
             self._cache[context.thread_id] = context
             
-            # Prepare data for storage
-            data = context.to_dict()
-            
-            # Upsert to database
-            result = supabase.table(self.table_name).upsert(
-                data, 
-                on_conflict="thread_id"
-            ).execute()
-            
-            if result.data:
-                logger.info(f"Saved conversation: {context.thread_id}, {len(context.recent_messages)} messages")
+            # Save to database if available
+            if SUPABASE_AVAILABLE and supabase:
+                # Prepare data for storage in smart_conversation_memory format
+                data = {
+                    "thread_id": context.thread_id,
+                    "customer_context": context.customer_context,
+                    "recent_messages": context.recent_messages,
+                    "session_metadata": context.session_metadata,
+                    "last_activity": context.last_activity.isoformat(),
+                    "created_at": context.created_at.isoformat()
+                }
+                
+                # Upsert to database
+                result = supabase.table(self.table_name).upsert(
+                    data, 
+                    on_conflict="thread_id"
+                ).execute()
+                
+                if result.data:
+                    logger.info(f"Saved conversation: {context.thread_id}, {len(context.recent_messages)} messages")
+                else:
+                    logger.warning(f"Failed to save conversation: {context.thread_id}")
             else:
-                logger.warning(f"Failed to save conversation: {context.thread_id}")
+                logger.info(f"Saved conversation to cache only: {context.thread_id}")
                 
         except Exception as e:
             logger.error(f"Error saving conversation {context.thread_id}: {e}")
@@ -195,6 +240,9 @@ class MemoryManager:
         This should be run periodically (e.g., daily cron job).
         """
         try:
+            if not SUPABASE_AVAILABLE or not supabase:
+                return 0
+                
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.ttl_days)
             
             result = supabase.table(self.table_name).delete().lt(
@@ -236,4 +284,7 @@ class MemoryManager:
 
 
 # Global instance
-memory = MemoryManager() 
+memory_manager = MemoryManager()
+
+# Backward compatibility
+memory = memory_manager 
