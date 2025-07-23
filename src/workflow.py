@@ -350,6 +350,45 @@ class Workflow:
                 print(f"🔧 CREATING ORDER: {[tc['name'] for tc in response.tool_calls]}")
                 for tool_call in response.tool_calls:
                     print(f"Order Creation Tool: {tool_call['name']}, Args: {tool_call['args']}")
+        elif section["intent"] == "seleccion_productos":
+            print("🔄 Detected seleccion_productos intent - searching for products and managing order")
+            
+            # Enhanced prompt specifically for product selection
+            product_selection_prompt = f"""
+            SELECCIÓN DE PRODUCTOS - USUARIO: {user_id}
+            
+            ACCIÓN DEL USUARIO: {section["action"]}
+            
+            FLUJO OBLIGATORIO:
+            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
+            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{user_id}", "items": [], "total": 0.0}})
+            3. LUEGO: Buscar el producto mencionado:
+               - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
+               - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
+            4. El producto se agregará automáticamente al pedido en el siguiente paso
+            
+            EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
+            
+            IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
+            """
+            
+            product_context = [
+                SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
+                HumanMessage(content=product_selection_prompt)
+            ]
+            
+            response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(product_context)
+            updated_state = {"messages": list(state["messages"]) + [response]}
+            
+            # Log tool usage for product selection
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                print(f"🔧 PRODUCT SELECTION: {[tc['name'] for tc in response.tool_calls]}")
+                for tool_call in response.tool_calls:
+                    print(f"Product Tool: {tool_call['name']}, Args: {tool_call['args']}")
+                    if tool_call['name'] in ['get_pizza_by_name', 'get_beverage_by_name']:
+                        print(f"🍕 Searching for product: {tool_call['args']}")
+            else:
+                print("⚠️ No tools called for product selection")
         else:
             print(f"Sending enhanced prompt to LLM with tools...")
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
@@ -847,15 +886,24 @@ class Workflow:
                                 adiciones=[]
                             )
                             
-                            # Convert to dict for state storage
+                            # Convert to dict for state storage with complete product info
                             product_dict = {
+                                "id": product_detail.product_id,
                                 "product_id": product_detail.product_id,
                                 "product_name": product_detail.product_name,
+                                "nombre": product_detail.product_name,  # Alternative name field
                                 "product_type": product_detail.product_type,
+                                "tipo": product_detail.product_type,  # Alternative type field
                                 "base_price": product_detail.base_price,
                                 "total_price": product_detail.total_price,
+                                "precio": product_detail.total_price,  # Alternative price field
                                 "borde": product_detail.borde,
-                                "adiciones": product_detail.adiciones
+                                "adiciones": product_detail.adiciones,
+                                # Additional fields from the original tool result
+                                "tamano": tool_result.get("tamano", ""),
+                                "categoria": tool_result.get("categoria", ""),
+                                "descripcion": tool_result.get("descripcion", tool_result.get("texto_ingredientes", "")),
+                                "activo": tool_result.get("activo", True)
                             }
                             
                             # Add to local order items
@@ -877,25 +925,44 @@ class Workflow:
                                 if "error" not in db_order:
                                     # Update existing order in database
                                     order_id = db_order["id"]
-                                    current_items = db_order.get("pedido", {}).get("items", [])
-                                    current_items.append(product_dict)
-                                    new_total = sum(item.get("total_price", item.get("base_price", 0)) for item in current_items)
+                                    current_pedido = db_order.get("pedido", {})
+                                    current_items = current_pedido.get("items", [])
                                     
+                                    # Add the new product to the items list
+                                    current_items.append(product_dict)
+                                    current_total = sum(item.get("total_price", item.get("base_price", 0)) for item in current_items)
+                                    
+                                    # Update the order with new items and total
                                     update_result = update_order(
                                         id=order_id,
                                         items=current_items,
-                                        total=new_total
+                                        total=current_total
                                     )
                                     
                                     if "success" in update_result:
                                         print(f"✅ Product synced to pedidos_activos: {product_detail.product_name}")
+                                        print(f"📦 Database updated with {len(current_items)} items, total: ${current_total}")
                                     else:
                                         print(f"❌ Failed to sync product to DB: {update_result}")
                                 else:
                                     print(f"⚠️ No active order in DB to update: {db_order}")
+                                    # Try to create an order first
+                                    from src.tools import create_order
+                                    create_result = create_order(
+                                        cliente_id=user_id,
+                                        items=[product_dict],
+                                        total=product_detail.total_price,
+                                        direccion_entrega=None
+                                    )
+                                    if "success" in create_result:
+                                        print(f"✅ Created new order with product: {product_detail.product_name}")
+                                    else:
+                                        print(f"❌ Failed to create order with product: {create_result}")
                                     
                             except Exception as sync_error:
                                 print(f"❌ Error syncing product to DB: {sync_error}")
+                                import traceback
+                                print(f"Full traceback:\n{traceback.format_exc()}")
                             
                 except (json.JSONDecodeError, KeyError) as e:
                     print(f"Error processing tool result: {e}")
