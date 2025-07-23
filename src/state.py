@@ -33,9 +33,12 @@ class ChatState(TypedDict):
     Each key represents a piece of information that persists throughout the conversation.
     """
     
-    # Core conversation data
-    user_id: str                                    # Unique identifier for the user
+    # Core conversation data                              # Unique identifier for the user
     messages: Annotated[Sequence[BaseMessage], lambda x, y: x + y]  # Conversation history
+    
+    # User Information
+    user_id: str      
+    costumer = Optional[Dict[str, Any]]  # Customer data from database
     
     # Contextual information
     divided_message: Optional[List[Dict[str, str]]] = None
