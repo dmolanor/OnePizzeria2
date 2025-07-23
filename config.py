@@ -8,7 +8,7 @@ from supabase import Client, create_client
 load_dotenv()   
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # AI Configuration - Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")

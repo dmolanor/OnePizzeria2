@@ -117,8 +117,8 @@ class Workflow:
             print(f"New message content: {new_message}")
             
             # Get complete state for context (commented out for now)
-            # complete_state = await state_manager.load_state_for_user(user_id, new_message)
-            complete_state = {"messages": []}
+            complete_state = await state_manager.load_state_for_user(user_id, new_message)
+            #complete_state = {"messages": []}
             print(f"Complete state: {complete_state}")
             
             context = [
