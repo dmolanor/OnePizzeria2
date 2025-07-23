@@ -482,7 +482,7 @@
   {
     "table_name": "pedidos_activos",
     "column_name": "estado",
-    "data_type": "USER-DEFINED",
+    "data_type": "text",
     "character_maximum_length": null,
     "numeric_precision": null,
     "numeric_scale": null,
@@ -520,6 +520,16 @@
     "is_nullable": "NO"
   },
   {
+    "table_name": "pedidos_activos",
+    "column_name": "metodo_pago",
+    "data_type": "text",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "YES"
+  },
+  {
     "table_name": "pedidos_finalizados",
     "column_name": "id",
     "data_type": "integer",
@@ -542,11 +552,11 @@
   {
     "table_name": "pedidos_finalizados",
     "column_name": "estado",
-    "data_type": "USER-DEFINED",
+    "data_type": "text",
     "character_maximum_length": null,
     "numeric_precision": null,
     "numeric_scale": null,
-    "column_default": "'ENTREGADO'::pedido_finalizado_estado",
+    "column_default": null,
     "is_nullable": "NO"
   },
   {
@@ -588,6 +598,16 @@
     "numeric_scale": null,
     "column_default": "now()",
     "is_nullable": "NO"
+  },
+  {
+    "table_name": "pedidos_finalizados",
+    "column_name": "metodo_pago",
+    "data_type": "text",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "YES"
   },
   {
     "table_name": "pizzas_armadas",

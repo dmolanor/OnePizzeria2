@@ -32,11 +32,14 @@ class Workflow:
         graph.add_node("detect_intent", self.detect_user_intent_step)
         graph.add_node("retrieve_data", self.retrieve_data_step)
         graph.add_node("tools", ToolNode(ALL_TOOLS))
+        graph.add_node("process_results", self.process_tool_results_step)
         graph.add_node("send_response", self.send_response_step)
-        graph.add_node("save_memory", self.save_memory_step)  # 📤 New final node
+        graph.add_node("save_memory", self.save_memory_step)
         
-        # Set up the flow
+        # Set up the flow - LINEAR PROGRESSION
         graph.set_entry_point("detect_intent")
+        
+        # After intent detection, decide next step
         graph.add_conditional_edges(
             "detect_intent",
             self.should_continue_after_intent,
@@ -46,6 +49,8 @@ class Workflow:
             }
         )
         graph.add_conditional_edges(
+            "retrieve_data",
+            self.should_use_tools,
             "retrieve_data",
             self.should_use_tools,
             {
@@ -93,6 +98,7 @@ class Workflow:
                 "registro_datos_personales": 0,
                 "registro_direccion": 0,
                 "consulta_menu": 0,
+                "crear_pedido": 0,
                 "seleccion_productos": 0,
                 "confirmacion": 0,
                 "finalizacion": 0,
@@ -180,6 +186,13 @@ class Workflow:
                         existing_order_states["saludo"] = 2
                         print(f"Marked saludo as completed (2)")
                         
+                    # Auto-trigger crear_pedido for product selection if no active order
+                    elif intent == "seleccion_productos":
+                        # Check if we need to create an order first
+                        if existing_order_states.get("crear_pedido", 0) == 0:
+                            existing_order_states["crear_pedido"] = 1
+                            print(f"Auto-triggered crear_pedido for product selection")
+                        
                 else:
                     existing_order_states["general"] = 1
             
@@ -197,6 +210,7 @@ class Workflow:
                 "registro_datos_personales": existing_order_states.get("registro_datos_personales", 0),
                 "registro_direccion": existing_order_states.get("registro_direccion", 0),
                 "consulta_menu": existing_order_states.get("consulta_menu", 0),
+                "crear_pedido": existing_order_states.get("crear_pedido", 0),
                 "seleccion_productos": existing_order_states.get("seleccion_productos", 0),
                 "confirmacion": existing_order_states.get("confirmacion", 0),
                 "finalizacion": existing_order_states.get("finalizacion", 0),
@@ -221,6 +235,7 @@ class Workflow:
                 "registro_datos_personales": existing_states.get("registro_datos_personales", 0),
                 "registro_direccion": existing_states.get("registro_direccion", 0),
                 "consulta_menu": existing_states.get("consulta_menu", 0),
+                "crear_pedido": existing_states.get("crear_pedido", 0),
                 "seleccion_productos": existing_states.get("seleccion_productos", 0),
                 "confirmacion": existing_states.get("confirmacion", 0),
                 "finalizacion": existing_states.get("finalizacion", 0),
@@ -272,17 +287,32 @@ class Workflow:
         - Extrae la dirección del action  
         - Usa update_client con formato: {{"id": "{user_id}", "direccion": "direccion_completa"}}
         
+        Si es "crear_pedido":
+        - SIEMPRE usa create_order para crear un pedido en pedidos_activos
+        - Usa create_order con formato: {{"cliente_id": "{user_id}", "items": [], "total": 0.0, "direccion_entrega": "direccion_del_cliente"}}
+        - CRÍTICO: Esto debe ejecutarse ANTES de agregar productos
+        
         Si es "seleccion_productos":
-        - Si menciona pizza: usa get_pizza_by_name con {{"name": "nombre_pizza"}}
-        - Si menciona bebida: usa get_beverage_by_name con {{"name": "nombre_bebida"}}
+        - PRIMERO: Verifica si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
+        - Si NO existe pedido activo: USA create_order PRIMERO
+        - LUEGO: Si menciona pizza: usa get_pizza_by_name con name="nombre_pizza_exacto"
+        - LUEGO: Si menciona bebida: usa get_beverage_by_name con name="nombre_bebida_exacto"
+        - DESPUÉS de obtener productos: USA update_order para agregar al pedido activo
         
         Si es "confirmacion":
-        - Si confirma pedido y hay productos en el pedido: usa create_order
-        - IMPORTANTE: Solo usar create_order si active_order tiene productos (order_items no vacío)
+        - Si confirma pedido y hay productos: usa update_order para actualizar dirección y método de pago
+        - IMPORTANTE: Solo actualizar pedido cuando el usuario CONFIRME explícitamente
         
-        Si es "saludo":
-        - No usar herramientas
-        - Responder con un json vacío {{}}
+        Si es "finalizacion":
+        - Si el usuario proporciona método de pago: usa finish_order con {{"cliente_id": "{user_id}"}}
+        - Esto moverá el pedido de activos a finalizados
+        
+        FLUJO CRÍTICO PARA PRODUCTOS:
+        1. Verificar pedido activo (get_active_order_by_client)
+        2. Si no existe → Crear pedido (create_order)
+        3. Buscar producto (get_pizza_by_name/get_beverage_by_name)
+        4. Actualizar pedido con producto (update_order)
+        
         RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
         """
         
@@ -316,6 +346,10 @@ class Workflow:
                     # If it's a product search, we'll get the result and add to order
                     if tool_call['name'] in ['get_pizza_by_name', 'get_beverage_by_name']:
                         print(f"Product search detected, will add to order after tool execution")
+                    elif tool_call['name'] == 'create_order':
+                        print(f"🎯 Order creation detected - this will create pedido_activo")
+                    elif tool_call['name'] == 'get_active_order_by_client':
+                        print(f"🔍 Checking for existing active order")
             else:
                 print("ℹ️  No tools called for this section")
         
@@ -340,7 +374,7 @@ class Workflow:
             
             # 🔍 IDENTIFICAR MENSAJES NUEVOS QUE NO ESTÁN EN BD
             from src.memory import memory
-            
+
             # Obtener conversación actual de la BD para comparar
             existing_context = await memory.get_conversation(user_id)
             existing_messages = existing_context.recent_messages
@@ -533,6 +567,7 @@ class Workflow:
             "registro_datos_personales": order_states.get("registro_datos_personales", 0),
             "registro_direccion": order_states.get("registro_direccion", 0),
             "consulta_menu": order_states.get("consulta_menu", 0),
+            "crear_pedido": order_states.get("crear_pedido", 0),
             "seleccion_productos": order_states.get("seleccion_productos", 0),
             "confirmacion": order_states.get("confirmacion", 0),
             "finalizacion": order_states.get("finalizacion", 0),
@@ -546,6 +581,7 @@ class Workflow:
             "saludo",
             "registro_datos_personales", 
             "registro_direccion",
+            "crear_pedido",
             "seleccion_productos",
             "confirmacion",
             "finalizacion"
@@ -560,10 +596,22 @@ class Workflow:
             
             if current_value != 2:  # Not completed
                 # Special logic for some states
-                if state_name == "seleccion_productos":
-                    if len(order_items) == 0:
-                        print(f"🎯 Next state: {state_name} (no products selected)")
+                if state_name == "crear_pedido":
+                    if len(order_items) == 0 and current_value == 0:
+                        print(f"🎯 Next state: {state_name} (no order created yet)")
                         return state_name
+                    elif current_value == 1:
+                        print(f"🔄 {state_name} in progress, continuing...")
+                        continue
+                elif state_name == "seleccion_productos":
+                    if len(order_items) == 0:
+                        # If no order created yet, need to create order first
+                        if order_states.get("crear_pedido", 0) != 2:
+                            print(f"🎯 Next state: crear_pedido (needed before selecting products)")
+                            return "crear_pedido"
+                        else:
+                            print(f"🎯 Next state: {state_name} (no products selected)")
+                            return state_name
                     else:
                         # If we have products, mark this as completed
                         print(f"✅ {state_name} should be completed (has {len(order_items)} products)")
@@ -589,6 +637,8 @@ class Workflow:
             "registro_datos_personales": "PRÓXIMO PASO: El cliente ya está registrado, no pidas datos personales nuevamente.",
             
             "registro_direccion": "PRÓXIMO PASO: El cliente ya tiene dirección registrada, no la menciones a menos que sea necesario para el registro.",
+            
+            "crear_pedido": "PRÓXIMO PASO: El cliente quiere hacer un pedido. Crea un pedido activo en la base de datos.",
             
             "seleccion_productos": "PRÓXIMO PASO: El cliente necesita seleccionar productos. Pregunta qué le gustaría ordenar o muestra opciones del menú.",
             
@@ -653,6 +703,17 @@ class Workflow:
             return "send"
         return "retrieve"
 
+    def should_continue_after_processing(self, state: Dict[str, Any]) -> Literal["retrieve", "send"]:
+        """Determine if we should continue processing more messages or send response."""
+        divided_message = state.get("divided_message", [])
+        print(f"After processing results, remaining messages: {len(divided_message)}")
+        
+        if divided_message:
+            print("More messages to process, continuing with retrieve_data...")
+            return "retrieve"
+        else:
+            print("No more messages to process, sending response...")
+            return "send"
 
     def should_use_tools(self, state: Dict[str, Any]) -> Literal["tools", "send"]:
         """Determine if we need to use tools based on the last message."""
@@ -683,7 +744,7 @@ class Workflow:
             return "send"
 
     async def process_tool_results_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Process tool execution results and update active_order using structured classes."""
+        """Process tool execution results and sync with pedidos_activos."""
         from datetime import datetime
         
         print(f"=== PROCESSING TOOL RESULTS ===")
@@ -705,6 +766,7 @@ class Workflow:
             "registro_datos_personales": 0,
             "registro_direccion": 0,
             "consulta_menu": 0,
+            "crear_pedido": 0,
             "seleccion_productos": 0,
             "confirmacion": 0,
             "finalizacion": 0,
@@ -714,46 +776,170 @@ class Workflow:
         print(f"Current order state: {len(active_order_data.get('order_items', []))} items, total: ${active_order_data.get('order_total', 0)}")
         print(f"Current order_states: {order_states}")
         
-        # Track if any products were added in this step
+        # Track actions completed in this step
         products_added = False
-        client_actions_completed = False
+        order_created = False
+        order_updated = False
+        order_finalized = False
         
         # Look for ToolMessage in recent messages
         for message in reversed(messages[-5:]):  # Check last 5 messages
             if hasattr(message, '__class__') and 'ToolMessage' in str(message.__class__):
                 print(f"🔧 Processing tool result: {message.content[:100]}...")
                 
-                # Process the tool result and get updated order
-                updated_order = self._process_tool_results(state, message)
-                
-                # Check if order was actually updated (new products added)
-                if len(updated_order.get("order_items", [])) > len(active_order_data.get("order_items", [])):
-                    active_order_data = updated_order
-                    products_added = True
-                    print(f"📦 Order updated: {len(active_order_data['order_items'])} items, total: ${active_order_data['order_total']}")
-                
-                # Check for successful client operations
                 try:
                     import json
                     tool_result = json.loads(message.content)
                     
-                    # Check for successful client creation/update
-                    if "success" in tool_result and "Cliente" in tool_result.get("success", ""):
-                        client_actions_completed = True
-                        print("✅ Client action completed successfully")
+                    # Handle different tool results
+                    if "success" in tool_result:
+                        success_msg = tool_result["success"]
                         
-                except (json.JSONDecodeError, KeyError):
-                    pass
+                        # Order creation
+                        if "Pedido creado exitosamente" in success_msg:
+                            order_created = True
+                            order_states["crear_pedido"] = 2
+                            print("✅ Order created - marking crear_pedido as completed (2)")
+                            
+                        # Order update
+                        elif "Pedido actualizado exitosamente" in success_msg:
+                            order_updated = True
+                            print("✅ Order updated successfully")
+                            
+                        # Order finalization
+                        elif "Pedido finalizado exitosamente" in success_msg:
+                            order_finalized = True
+                            order_states["finalizacion"] = 2
+                            print("✅ Order finalized - marking finalizacion as completed (2)")
+                            # Clear active order since it's been finalized
+                            active_order_data = {
+                                "order_id": "",
+                                "order_date": "",
+                                "order_total": 0.0,
+                                "order_items": []
+                            }
+                            
+                        # Client operations
+                        elif "Cliente" in success_msg:
+                            if "creado" in success_msg or "actualizado" in success_msg:
+                                order_states["registro_datos_personales"] = 2
+                                print("✅ Client data updated - marking registro_datos_personales as completed (2)")
+                    
+                    # Handle product search results (pizza or beverage found)
+                    elif "precio" in tool_result and ("nombre" in tool_result or "nombre_producto" in tool_result):
+                        product_name = tool_result.get("nombre", tool_result.get("nombre_producto", ""))
+                        product_id = tool_result.get("id", "")
+                        
+                        # Check if this product is already in the order to prevent duplicates
+                        existing_product = None
+                        for item in active_order_data["order_items"]:
+                            if (item.get("product_id") == product_id and 
+                                item.get("product_name") == product_name):
+                                existing_product = item
+                                break
+                        
+                        if existing_product:
+                            print(f"⚠️ Product {product_name} already in order, skipping duplicate")
+                        else:
+                            print(f"🍕 Found new product: {tool_result}")
+                            
+                            # Create ProductDetails object using the class
+                            product_detail = ProductDetails(
+                                product_id=product_id,
+                                product_name=product_name,
+                                product_type="pizza" if "categoria" in tool_result else "bebida",
+                                base_price=float(tool_result.get("precio", 0)),
+                                total_price=float(tool_result.get("precio", 0)),
+                                borde={},
+                                adiciones=[]
+                            )
+                            
+                            # Convert to dict for state storage with complete product info
+                            product_dict = {
+                                "id": product_detail.product_id,
+                                "product_id": product_detail.product_id,
+                                "product_name": product_detail.product_name,
+                                "nombre": product_detail.product_name,  # Alternative name field
+                                "product_type": product_detail.product_type,
+                                "tipo": product_detail.product_type,  # Alternative type field
+                                "base_price": product_detail.base_price,
+                                "total_price": product_detail.total_price,
+                                "precio": product_detail.total_price,  # Alternative price field
+                                "borde": product_detail.borde,
+                                "adiciones": product_detail.adiciones,
+                                # Additional fields from the original tool result
+                                "tamano": tool_result.get("tamano", ""),
+                                "categoria": tool_result.get("categoria", ""),
+                                "descripcion": tool_result.get("descripcion", tool_result.get("texto_ingredientes", "")),
+                                "activo": tool_result.get("activo", True)
+                            }
+                            
+                            # Add to local order items
+                            active_order_data["order_items"].append(product_dict)
+                            active_order_data["order_total"] += product_detail.total_price
+                            products_added = True
+                            
+                            print(f"✅ Added product to local order: {product_detail.product_name} - ${product_detail.total_price}")
+                            print(f"📦 Current local order total: ${active_order_data['order_total']}")
+                            
+                            # 🔥 CRITICAL: Sync with pedidos_activos immediately
+                            try:
+                                from src.tools import (
+                                    get_active_order_by_client, update_order)
+
+                                # Get active order from database
+                                db_order = get_active_order_by_client(user_id)
+                                
+                                if "error" not in db_order:
+                                    # Update existing order in database
+                                    order_id = db_order["id"]
+                                    current_pedido = db_order.get("pedido", {})
+                                    current_items = current_pedido.get("items", [])
+                                    
+                                    # Add the new product to the items list
+                                    current_items.append(product_dict)
+                                    current_total = sum(item.get("total_price", item.get("base_price", 0)) for item in current_items)
+                                    
+                                    # Update the order with new items and total
+                                    update_result = update_order(
+                                        id=order_id,
+                                        items=current_items,
+                                        total=current_total
+                                    )
+                                    
+                                    if "success" in update_result:
+                                        print(f"✅ Product synced to pedidos_activos: {product_detail.product_name}")
+                                        print(f"📦 Database updated with {len(current_items)} items, total: ${current_total}")
+                                    else:
+                                        print(f"❌ Failed to sync product to DB: {update_result}")
+                                else:
+                                    print(f"⚠️ No active order in DB to update: {db_order}")
+                                    # Try to create an order first
+                                    from src.tools import create_order
+                                    create_result = create_order(
+                                        cliente_id=user_id,
+                                        items=[product_dict],
+                                        total=product_detail.total_price,
+                                        direccion_entrega=None
+                                    )
+                                    if "success" in create_result:
+                                        print(f"✅ Created new order with product: {product_detail.product_name}")
+                                    else:
+                                        print(f"❌ Failed to create order with product: {create_result}")
+                                    
+                            except Exception as sync_error:
+                                print(f"❌ Error syncing product to DB: {sync_error}")
+                                import traceback
+                                print(f"Full traceback:\n{traceback.format_exc()}")
+                            
+                except (json.JSONDecodeError, KeyError) as e:
+                    print(f"Error processing tool result: {e}")
         
         # Update order_states based on successful actions
         if products_added:
             order_states["seleccion_productos"] = 2  # Mark as completed
             print("✅ Products added - marking seleccion_productos as completed (2)")
             
-        if client_actions_completed:
-            order_states["registro_datos_personales"] = 2  # Mark as completed
-            print("✅ Client data updated - marking registro_datos_personales as completed (2)")
-        
         return {
             "active_order": active_order_data,
             "order_states": order_states,
@@ -762,6 +948,7 @@ class Workflow:
             "registro_datos_personales": order_states.get("registro_datos_personales", 0),
             "registro_direccion": order_states.get("registro_direccion", 0),
             "consulta_menu": order_states.get("consulta_menu", 0),
+            "crear_pedido": order_states.get("crear_pedido", 0),
             "seleccion_productos": order_states.get("seleccion_productos", 0),
             "confirmacion": order_states.get("confirmacion", 0),
             "finalizacion": order_states.get("finalizacion", 0),

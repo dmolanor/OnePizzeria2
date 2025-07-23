@@ -55,6 +55,7 @@ class ChatState(TypedDict):
     registro_datos_personales: Optional[int] 
     registro_direccion: Optional[int]
     consulta_menu: Optional[int]
+    crear_pedido: Optional[int]
     seleccion_productos: Optional[int]
     confirmacion: Optional[int]
     finalizacion: Optional[int]
