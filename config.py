@@ -18,6 +18,9 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"
 GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini-2024-07-18")
 
+# Telegram Configuration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
 logging.info(f"GOOGLE_API_KEY loaded: {bool(GOOGLE_API_KEY)}")
 logging.info(f"Using LLM_MODEL: {GOOGLE_MODEL}")
 
