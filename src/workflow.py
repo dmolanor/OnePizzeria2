@@ -5,7 +5,7 @@ from typing import Annotated, Any, Dict, Literal
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
@@ -15,12 +15,11 @@ from typing_extensions import TypedDict
 from .checkpointer import state_manager
 from .prompts import CustomerServicePrompts
 from .state import ChatState, Order, ProductDetails
-from .tools import SupabaseService
-
+from ..config import supabase, ALL_TOOLS
 
 class Workflow:
     def __init__(self):
-        self.supabase = SupabaseService()
+        self.supabase = supabase
         self.llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0.1,
@@ -32,7 +31,7 @@ class Workflow:
         graph = StateGraph(ChatState)
         graph.add_node("detect_intent", self.detect_user_intent_step)
         graph.add_node("retrieve_data", self.retrieve_data_step)
-        graph.add_node("tools", ToolNode(self.supabase.ALL_TOOLS))
+        graph.add_node("tools", ToolNode(ALL_TOOLS))
         graph.add_node("send_response", self.send_response_step)
         graph.set_entry_point("detect_intent")
         graph.add_edge("detect_intent", "retrieve_data")
@@ -131,7 +130,7 @@ class Workflow:
         
         section = state["divided_message"].pop()
 
-        response = self.llm.bind_tools(self.supabase.ALL_TOOLS).invoke([SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM)] + [HumanMessage(content=self.prompts.tool_execution_user(section))])
+        response = self.llm.bind_tools(ALL_TOOLS).invoke([SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM)] + [HumanMessage(content=self.prompts.tool_execution_user(section))])
         
         if hasattr(response, "tool_calls") and response.tool_calls:
             print(f"🔧 USING TOOLS: {[tc['name'] for tc in response.tool_calls]}")
