@@ -134,17 +134,25 @@ class ChatStateManager:
             context = await self.memory_manager.get_conversation(user_id)
             
             # Get customer data from database
-            from .tools import get_customer
-            customer = get_customer.invoke({"user_id": user_id})
+            try:
+                from .tools import get_customer
+                customer = get_customer.invoke({"user_id": user_id})
+            except (ImportError, Exception) as e:
+                print(f"Warning: Could not get customer data: {e}")
+                customer = None
             
             # Get active order if exists
-            from .tools import get_active_order
-            active_order = get_active_order.invoke({"user_id": user_id})
+            try:
+                from .tools import get_active_order
+                active_order = get_active_order.invoke({"user_id": user_id})
+            except (ImportError, Exception) as e:
+                print(f"Warning: Could not get active order: {e}")
+                active_order = None
             
             # Build the ChatState
             from langchain_core.messages import HumanMessage
 
-            from .models import ChatState
+            from .state import ChatState
 
             # Get conversation history as LangChain messages
             historical_messages = context.get_messages_for_llm()
@@ -178,7 +186,7 @@ class ChatStateManager:
             # Return minimal state on error
             from langchain_core.messages import HumanMessage
 
-            from .models import ChatState
+            from .state import ChatState
             
             return ChatState(
                 user_id=user_id,

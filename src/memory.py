@@ -93,7 +93,7 @@ class MemoryManager:
     """
     
     def __init__(self):
-        self.table_name = "conversation_memory"
+        self.table_name = "smart_conversation_memory"
         self.ttl_days = 7  # Auto-cleanup after 7 days of inactivity
         self.max_message_length = 1000  # Truncate very long messages
         
