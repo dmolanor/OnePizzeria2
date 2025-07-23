@@ -13,8 +13,8 @@ from telegram import Update
 from typing_extensions import TypedDict
 
 from .checkpointer import state_manager
-from .models import ChatState, Order, ProductDetails
 from .prompts import CustomerServicePrompts
+from .state import ChatState, Order, ProductDetails
 from .tools import SupabaseService
 
 
@@ -47,25 +47,24 @@ class Workflow:
         return graph.compile()
         
     
-    async def detect_user_intent_step(self, update: Update, state: ChatState) -> Dict[str, Any]:
+    async def detect_user_intent_step(self, state: ChatState) -> Dict[str, Any]:
         print(f"Dividing message and identifying intent: {state["messages"][-1].content}")
         
         user_id = state["user_id"]
         costumer = self.supabase.get_client_by_phone_number(user_id)
         
-        user = update.effective_user
         new_message = state["messages"][-1].content if state["messages"] else ""
         
-        complete_state = await state_manager.load_state_for_user(user.id, new_message)
+        complete_state = await state_manager.load_state_for_user(user_id, new_message)
 
         
-        messages = [
+        context = [
             SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
             HumanMessage(content=self.prompts.message_splitting_user(state["messages"]))
         ]
         
         try:
-            response = self.llm.invoke(messages)
+            response = self.llm.invoke(context)
             print(f"Divided message response: {response.content}")
             saludo = 0
             registro_datos_personales = 0
@@ -113,7 +112,8 @@ class Workflow:
                     "confirmacion": confirmacion,
                     "finalizacion": finalizacion,
                     "general": general,
-                    "costumer": costumer}
+                    "costumer": costumer,
+                    "messages": complete_state.get("messages", [])}
             
         except Exception as e:
             print(e)
@@ -157,24 +157,25 @@ class Workflow:
 
         return {"messages": [response]}
     
+    
     def _build_conversation_context(self, state: ChatState) -> list:
         """
         Build conversation context using memory and current state.
         """
         
-        messages = []
+        context = []
         
-        messages.append(SystemMessage(content=self.prompts.ANSWER_SYSTEM))
+        context.append(SystemMessage(content=self.prompts.ANSWER_SYSTEM))
         user_id = state["user_id"]
-        messages.append(SystemMessage(content=f"IMPORTANTE: EL user_id de este cliente es {user_id}. Usar siempre user_id para utilizar herramientas que lo requieran"))
+        context.append(SystemMessage(content=f"IMPORTANTE: EL user_id de este cliente es {user_id}. Usar siempre user_id para utilizar herramientas que lo requieran"))
         
-        #if state["costumer"]:
-        #    messages.append(SystemMessage(content=f"Esta es la información actual del cliente: {state['costumer']}"))
+        if state["costumer"]:
+            context.append(SystemMessage(content=f"Esta es la información actual del cliente: {state['costumer']}"))
         
-        messages.extend(state["messages"])
-        print(messages)
+        context.extend(state["messages"])
+        print(context)
         
-        return messages
+        return context
     
     def should_use_tools(self, state: ChatState) -> bool:
         """
