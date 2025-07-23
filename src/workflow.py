@@ -45,15 +45,15 @@ class Workflow:
                 "send": "send_response"
             }
         )
+        graph.add_edge( "retrieve_data", "tools")
         graph.add_conditional_edges(
-            "retrieve_data",
-            self.should_use_tools,
+            "tools", 
+            self.should_use_tools, 
             {
-                "tools": "tools",
-                "send": "send_response"
-            }
-        )
-        graph.add_edge("tools", "process_results")  # After tools, process results
+                "tools": "retrieve_data",
+                "process": "process_results"
+            },
+        )  # After tools, process results
         graph.add_node("process_results", self.process_tool_results_step)
         graph.add_edge("process_results", "retrieve_data")  # Then continue with retrieve_data
         graph.add_edge("send_response", "save_memory")  # 📤 Always save after response
@@ -653,9 +653,9 @@ class Workflow:
         divided_message = state.get("divided_message", [])
         if divided_message:
             print("Still have divided messages, continuing retrieval...")
-            return "send"  # Changed from "retrieve" to avoid infinite loop
+            return "process"  # Changed from "retrieve" to avoid infinite loop
         
-        return "send"
+        return "process"
 
     async def process_tool_results_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Process tool execution results and update active_order using structured classes."""
