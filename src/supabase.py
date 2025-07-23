@@ -16,14 +16,11 @@ class SupabaseService:
 
     # PEDIDOS
 
-    def get_orders(self) -> list[dict]:
-        return self.supabase.table("pedidos_activos").select("*").execute().data
-
     def get_order_by_id(self, id: int) -> dict:
         return self.supabase.table("pedidos_activos").select("*").eq("id", id).execute().data[0]
 
-    def get_order_by_client_id(self, client_id: int) -> list[dict]:
-        return self.supabase.table("pedidos_activos").select("*").eq("cliente_id", client_id).execute().data
+    #def get_order_by_client_id(self, client_id: int) -> list[dict]:
+    #    return self.supabase.table("pedidos_activos").select("*").eq("cliente_id", client_id).execute().data
 
     def create_order(self, order: dict) -> None:
         self.supabase.table("pedidos_activos").insert(order).execute()
@@ -44,8 +41,8 @@ class SupabaseService:
     def get_client_by_phone_number(self, phone_number: str) -> dict:
         return self.supabase.table("clientes").select("*").eq("id", phone_number).execute().data[0]
 
-    def get_client_by_full_name(self, full_name: str) -> dict:
-        return self.supabase.table("clientes").select("*").eq("nombre_completo", full_name).execute().data[0]
+    #def get_client_by_full_name(self, full_name: str) -> dict:
+    #    return self.supabase.table("clientes").select("*").eq("nombre_completo", full_name).execute().data[0]
 
     def create_client(self, client: dict) -> None:
         self.supabase.table("clientes").insert(client).execute()
@@ -132,8 +129,10 @@ class SupabaseService:
         return self.supabase.table("bordes").select("*").eq("nombre", name).execute().data[0]
     
     
-    CUSTOMER_TOOLS = [get_client_by_phone_number, get_client_by_full_name, create_client, update_client]
-    ORDER_TOOLS = [get_orders, get_order_by_id, get_order_by_client_id, create_order, update_order, delete_order, finish_order]  # Removed get_menu - only use search_menu and send_full_menu
+    #CUSTOMER_TOOLS = [get_client_by_phone_number, get_client_by_full_name, create_client, update_client]
+    CUSTOMER_TOOLS = [get_client_by_phone_number, create_client, update_client]
+    #ORDER_TOOLS = [get_orders, get_order_by_id, get_order_by_client_id, create_order, update_order, delete_order, finish_order]  # Removed get_menu - only use search_menu and send_full_menu
+    ORDER_TOOLS = [get_order_by_id, create_order, update_order, delete_order, finish_order]  # Removed get_menu - only use search_menu and send_full_menu
     MENU_TOOLS = [get_pizzas, get_pizzas_by_all_ingredients, get_pizza_by_name, get_pizzas_by_type, get_combos, get_combo_by_name, get_beverages, get_beverage_by_name, get_beverages_by_sugar, get_beverages_by_alcohol, get_aditions, get_adition_by_name, get_borders, get_border_by_name]
 
     # Complete tool list for the agent

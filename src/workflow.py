@@ -1,3 +1,5 @@
+import json
+import re
 from typing import Annotated, Any, Dict, Literal
 
 from langchain.chat_models import init_chat_model
@@ -12,9 +14,6 @@ from typing_extensions import TypedDict
 from .state import ChatState, Order, ProductDetails
 from .prompts import CustomerServicePrompts
 from .supabase import SupabaseService
-
-import json
-import re
 
 
 class Workflow:
