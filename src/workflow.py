@@ -45,17 +45,24 @@ class Workflow:
                 "send": "send_response"
             }
         )
-        graph.add_edge( "retrieve_data", "tools")
         graph.add_conditional_edges(
-            "tools", 
-            self.should_use_tools, 
+            "retrieve_data",
+            self.should_use_tools,
             {
-                "tools": "retrieve_data",
-                "process": "process_results"
-            },
-        )  # After tools, process results
+                "tools": "tools",
+                "send": "send_response"
+            }
+        )
+        graph.add_edge("tools", "process_results")  # After tools, process results
         graph.add_node("process_results", self.process_tool_results_step)
-        graph.add_edge("process_results", "retrieve_data")  # Then continue with retrieve_data
+        graph.add_conditional_edges(
+            "process_results",
+            self.should_continue_processing,
+            {
+                "continue": "retrieve_data",  # Más elementos en divided_message
+                "send": "send_response"       # No más elementos, ir a respuesta
+            }
+        )
         graph.add_edge("send_response", "save_memory")  # 📤 Always save after response
         graph.add_edge("save_memory", END)  # 📤 End after saving
         
@@ -176,22 +183,14 @@ class Workflow:
                 else:
                     existing_order_states["general"] = 1
             
-            # 🔄 PRESERVAR MENSAJES: Combinar mensajes históricos + mensaje actual del usuario
-            historical_messages = complete_state.get("messages", [])
-            current_user_message = state["messages"][-1] if state["messages"] else None
-            
-            # Si el mensaje actual del usuario no está ya en el historial, añadirlo
-            all_messages = historical_messages[:]  # Copia del historial
-            if current_user_message and (not historical_messages or 
-                historical_messages[-1].content != current_user_message.content):
-                all_messages.append(current_user_message)
-                print(f"✅ Added current user message to conversation history")
+            # 🚫 REMOVED MANUAL MESSAGE COMBINATION - LangGraph handles this automatically
+            # The ChatState annotation already concatenates messages, so we don't need to manually combine them
             
             result = {
                 "divided_message": divided,
                 "order_states": existing_order_states,
                 "customer": customer,
-                "messages": all_messages,  # 📝 Mensajes históricos + mensaje actual
+                # No manual message manipulation - let LangGraph handle it
                 "active_order": state.get("active_order", {}),  # Preserve active_order
                 # Individual state fields for ChatState compatibility
                 "saludo": existing_order_states.get("saludo", 0),
@@ -297,13 +296,15 @@ class Workflow:
         if section["intent"] == "confirmacion":
             print("🔄 Detected confirmation intent - handling order confirmation")
             confirmation_result = await self._handle_order_confirmation(state, section)
-            updated_state = {"messages": list(state["messages"]) + confirmation_result["messages"]}
-        else:
+            # 🚫 REMOVED MANUAL MESSAGE ADDITION - LangGraph handles this automatically
+            updated_state = {"messages": confirmation_result["messages"]}  # Only return new messages
+        else:   
             print(f"Sending enhanced prompt to LLM with tools...")
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
             
             print(f"Response retrieve_data_step: {response}")
-            updated_state = {"messages": list(state["messages"]) + [response]}
+            # 🚫 REMOVED MANUAL MESSAGE ADDITION - LangGraph handles this automatically
+            updated_state = {"messages": [response]}  # Only return the new message
             
             # Check for tool calls
             if hasattr(response, "tool_calls") and response.tool_calls:
@@ -472,7 +473,16 @@ class Workflow:
         next_incomplete_state = self._get_next_incomplete_state(order_states, order_items)
         
         # Build context based on current state and next action needed
+        print(f"📊 ANTES DE BUILD_CONVERSATION_CONTEXT:")
+        print(f"   - Total mensajes en estado: {len(messages)}")
+        for i, msg in enumerate(messages):
+            role = "👤 Usuario" if hasattr(msg, '__class__') and 'Human' in str(msg.__class__) else "🤖 Agente"
+            content_preview = msg.content[:30] + "..." if len(msg.content) > 30 else msg.content
+            print(f"   {i+1}. {role}: {content_preview}")
+        
         context = self._build_conversation_context(state)
+        if context is None:
+            context = []
         
         # Add order information to context if there are products
         if len(order_items) > 0:
@@ -512,11 +522,10 @@ class Workflow:
         
         # NOTE: Memory saving moved to dedicated final node
         
-        # 🔄 PRESERVAR TODOS LOS MENSAJES: Históricos + respuesta actual
-        all_messages = messages + [response]  # Mantener historial completo + nueva respuesta
+        # 🚫 REMOVED MANUAL MESSAGE ADDITION - LangGraph handles this automatically
         
         return {
-            "messages": all_messages,  # 📝 Todos los mensajes preservados
+            "messages": [response],  # Only return the new response message
             "order_states": order_states,  # Preserve states
             "active_order": active_order,   # Preserve active order
             # Individual state fields for ChatState compatibility
@@ -610,7 +619,18 @@ class Workflow:
                         "Usar siempre user_id para utilizar herramientas que lo requieran"
             )
         )
-        
+        if state["order_states"]["registro_datos_personales"] == 2:
+            context.append(
+                SystemMessage(
+                    content=f"El cliente ya está registrado, no pidas datos personales nuevamente."
+                )
+            )
+        else:
+            context.append(
+                SystemMessage(
+                    content=f"El cliente no está registrado, pide datos personales."
+                )
+            )
         if state.get("customer"):
             context.append(
                 SystemMessage(
@@ -620,10 +640,8 @@ class Workflow:
         
         context.extend(state["messages"])
         
-        print(f"Context Loaded: ")
-        for message in context:
-            print(f"Message: {message}")
         return context
+        
     
     def should_continue_after_intent(self, state: Dict[str, Any]) -> Literal["retrieve", "send"]:
         """Determine if we should continue processing or send response after intent detection."""
@@ -646,16 +664,23 @@ class Workflow:
         
         # Check if the last message has tool calls
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            print(f"Found tool calls: {[tc['name'] for tc in last_message.tool_calls]}")
+            print(f"🔧 Found tool calls: {[tc['name'] for tc in last_message.tool_calls]}")
             return "tools"
         
-        # Check if we still have divided messages to process
+        # If no tool calls, go directly to send response
+        print("ℹ️ No tool calls needed, going to send response")
+        return "send"
+
+    def should_continue_processing(self, state: Dict[str, Any]) -> Literal["continue", "send"]:
+        """Determine if we should continue processing divided_message or send response."""
         divided_message = state.get("divided_message", [])
-        if divided_message:
-            print("Still have divided messages, continuing retrieval...")
-            return "process"  # Changed from "retrieve" to avoid infinite loop
         
-        return "process"
+        if divided_message:
+            print(f"📋 Still have {len(divided_message)} sections to process, continuing...")
+            return "continue"
+        else:
+            print("✅ All sections processed, going to send response")
+            return "send"
 
     async def process_tool_results_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Process tool execution results and update active_order using structured classes."""
