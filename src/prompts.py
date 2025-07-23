@@ -69,6 +69,7 @@ class CustomerServicePrompts:
             - **registro_datos_personales**: Proporciona nombre completo y/o teléfono
             - **registro_direccion**: Proporciona o confirma dirección de entrega
             - **consulta_menu**: Pregunta sobre productos, precios, ingredientes, opciones disponibles
+            - **crear_pedido**: Crea un pedido nuevo (si no hay pedido) dada la intención del usuario y lo crea en la base de datos de pedidos_activos
             - **seleccion_productos**: Solicita productos específicos ("quiero una pizza", "me das una coca cola")
             - **confirmacion**: Confirma el pedido actual ("sí, está correcto", "confirmo", "está bien")
             - **finalizacion**: Proporciona método de pago o finaliza el pedido
