@@ -12,10 +12,11 @@ from pydantic import BaseModel, Field
 from telegram import Update
 from typing_extensions import TypedDict
 
+from ..config import ALL_TOOLS, supabase
 from .checkpointer import state_manager
 from .prompts import CustomerServicePrompts
 from .state import ChatState, Order, ProductDetails
-from ..config import supabase, ALL_TOOLS
+
 
 class Workflow:
     def __init__(self):
@@ -187,7 +188,7 @@ class Workflow:
             return "send"
         return "retrieve"
 
-    def run(self, query:str) -> ChatState:
-        initial_state = ChatState(messages=query)
+    def run(self, query:str, user_id:str) -> ChatState:
+        initial_state = ChatState({"messages": [HumanMessage(content=query)], "user_id": user_id})
         final_state = self.workflow.invoke(initial_state)
         return ChatState(**final_state)

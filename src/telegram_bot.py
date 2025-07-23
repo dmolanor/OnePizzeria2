@@ -7,6 +7,8 @@ from telegram import Update
 from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
+from workflow import Workflow
+
 # Set higher logging level for httpx to avoid all GET and POST requests being logged
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -26,6 +28,7 @@ class TelegramBot:
             .concurrent_updates(True)
             .build()
         )
+        self.workflow = Workflow()
         self._setup_handlers()
         self._setup_shutdown_handlers()
 
@@ -93,7 +96,7 @@ class TelegramBot:
             
             # Here you can add your custom logic to process the message
             # For example, calling an AI service, database operations, etc.
-            response = f"Recibí tu mensaje: {message_text}\n\n¿Hay algo más en lo que pueda ayudarte?"
+            response = self.workflow.run(message_text, user_id)
             
             await update.message.reply_text(response)
             
