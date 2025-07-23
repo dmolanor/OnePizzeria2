@@ -688,5 +688,65 @@
     "numeric_scale": null,
     "column_default": "true",
     "is_nullable": "NO"
+  },
+  {
+    "table_name": "smart_conversation_memory",
+    "column_name": "thread_id",
+    "data_type": "text",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "NO"
+  },
+  {
+    "table_name": "smart_conversation_memory",
+    "column_name": "customer_context",
+    "data_type": "jsonb",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": "'{}'::jsonb",
+    "is_nullable": "YES"
+  },
+  {
+    "table_name": "smart_conversation_memory",
+    "column_name": "recent_messages",
+    "data_type": "jsonb",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": "'[]'::jsonb",
+    "is_nullable": "YES"
+  },
+  {
+    "table_name": "smart_conversation_memory",
+    "column_name": "session_metadata",
+    "data_type": "jsonb",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": "'{}'::jsonb",
+    "is_nullable": "YES"
+  },
+  {
+    "table_name": "smart_conversation_memory",
+    "column_name": "last_activity",
+    "data_type": "timestamp with time zone",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": "now()",
+    "is_nullable": "YES"
+  },
+  {
+    "table_name": "smart_conversation_memory",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": "now()",
+    "is_nullable": "YES"
   }
 ]

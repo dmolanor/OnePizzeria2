@@ -33,6 +33,7 @@ class Workflow:
         graph.add_node("retrieve_data", self.retrieve_data_step)
         graph.add_node("tools", ToolNode(ALL_TOOLS))
         graph.add_node("send_response", self.send_response_step)
+        graph.add_node("save_memory", self.save_memory_step)  # 📤 New final node
         
         # Set up the flow
         graph.set_entry_point("detect_intent")
@@ -55,7 +56,8 @@ class Workflow:
         graph.add_edge("tools", "process_results")  # After tools, process results
         graph.add_node("process_results", self.process_tool_results_step)
         graph.add_edge("process_results", "retrieve_data")  # Then continue with retrieve_data
-        graph.add_edge("send_response", END)
+        graph.add_edge("send_response", "save_memory")  # 📤 Always save after response
+        graph.add_edge("save_memory", END)  # 📤 End after saving
         
         # Compile with async support
         return graph.compile()
@@ -174,11 +176,22 @@ class Workflow:
                 else:
                     existing_order_states["general"] = 1
             
+            # 🔄 PRESERVAR MENSAJES: Combinar mensajes históricos + mensaje actual del usuario
+            historical_messages = complete_state.get("messages", [])
+            current_user_message = state["messages"][-1] if state["messages"] else None
+            
+            # Si el mensaje actual del usuario no está ya en el historial, añadirlo
+            all_messages = historical_messages[:]  # Copia del historial
+            if current_user_message and (not historical_messages or 
+                historical_messages[-1].content != current_user_message.content):
+                all_messages.append(current_user_message)
+                print(f"✅ Added current user message to conversation history")
+            
             result = {
                 "divided_message": divided,
                 "order_states": existing_order_states,
                 "customer": customer,
-                "messages": complete_state.get("messages", []),
+                "messages": all_messages,  # 📝 Mensajes históricos + mensaje actual
                 "active_order": state.get("active_order", {}),  # Preserve active_order
                 # Individual state fields for ChatState compatibility
                 "saludo": existing_order_states.get("saludo", 0),
@@ -268,6 +281,9 @@ class Workflow:
         - Si confirma pedido y hay productos en el pedido: usa create_order
         - IMPORTANTE: Solo usar create_order si active_order tiene productos (order_items no vacío)
         
+        Si es "saludo":
+        - No usar herramientas
+        - Responder con un json vacío {{}}
         RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
         """
         
@@ -286,6 +302,7 @@ class Workflow:
             print(f"Sending enhanced prompt to LLM with tools...")
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
             
+            print(f"Response retrieve_data_step: {response}")
             updated_state = {"messages": list(state["messages"]) + [response]}
             
             # Check for tool calls
@@ -310,6 +327,91 @@ class Workflow:
         
         return updated_state
     
+    async def save_memory_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """📤 FINAL NODE: Save complete conversation to memory database."""
+        try:
+            user_id = state["user_id"]
+            messages = state.get("messages", [])
+            
+            print(f"💾 SAVING COMPLETE CONVERSATION TO MEMORY")
+            print(f"   - User ID: {user_id}")
+            print(f"   - Total messages to save: {len(messages)}")
+            
+            # 🔍 IDENTIFICAR MENSAJES NUEVOS QUE NO ESTÁN EN BD
+            from src.memory import memory
+            
+            # Obtener conversación actual de la BD para comparar
+            existing_context = await memory.get_conversation(user_id)
+            existing_messages = existing_context.recent_messages
+            existing_count = len(existing_messages)
+            
+            print(f"   - Mensajes ya en BD: {existing_count}")
+            print(f"   - Mensajes en estado actual: {len(messages)}")
+            
+            # 📝 GUARDAR SOLO LOS MENSAJES NUEVOS (comparación por contenido)
+            # Crear set de contenidos existentes para comparación rápida
+            existing_contents = set()
+            for existing_msg in existing_messages:
+                existing_contents.add(f"{existing_msg['role']}:{existing_msg['content']}")
+            
+            new_messages_to_save = []
+            for message in messages:
+                role = "human" if hasattr(message, '__class__') and 'Human' in str(message.__class__) else "assistant"
+                message_key = f"{role}:{message.content}"
+                
+                # Solo agregar si no existe ya en la BD
+                if message_key not in existing_contents:
+                    new_messages_to_save.append(message)
+                    existing_contents.add(message_key)  # Evitar duplicados en esta sesión también
+            
+            print(f"   - Mensajes nuevos a guardar: {len(new_messages_to_save)}")
+            
+            if new_messages_to_save:
+                # Guardar cada mensaje nuevo individualmente
+                for i, message in enumerate(new_messages_to_save):
+                    try:
+                        await memory.add_message(user_id, message)
+                        role = "👤 Usuario" if hasattr(message, '__class__') and 'Human' in str(message.__class__) else "🤖 Agente"
+                        content_preview = message.content[:50] + "..." if len(message.content) > 50 else message.content
+                        print(f"   ✅ Guardado {i+1}/{len(new_messages_to_save)}: {role} - {content_preview}")
+                    except Exception as msg_error:
+                        print(f"   ❌ Error guardando mensaje {i+1}: {msg_error}")
+            else:
+                print(f"   ℹ️ No hay mensajes nuevos que guardar (todos ya existen)")
+            
+            # 🔄 ACTUALIZAR CONTEXTO DEL CLIENTE Y PEDIDO
+            try:
+                # Update customer context if we have relevant info
+                if state.get("customer") and state["customer"].get("nombre_completo"):
+                    await memory.update_customer_context(
+                        user_id, 
+                        "customer_name", 
+                        state["customer"]["nombre_completo"]
+                    )
+                    print(f"   ✅ Contexto del cliente actualizado")
+                
+                # Update order context if we have an active order
+                if state.get("active_order") and state["active_order"].get("order_items"):
+                    await memory.update_customer_context(
+                        user_id,
+                        "current_order",
+                        state["active_order"]
+                    )
+                    print(f"   ✅ Contexto del pedido actualizado")
+            except Exception as context_error:
+                print(f"   ⚠️ Error actualizando contexto: {context_error}")
+            
+            print(f"✅ Conversación completa guardada para usuario {user_id}")
+            
+            # Return the state unchanged (this is the final node)
+            return state
+            
+        except Exception as e:
+            print(f"⚠️ Error saving conversation to memory: {e}")
+            import traceback
+            print(f"Full traceback:\n{traceback.format_exc()}")
+            # Return state even if saving fails (don't break the workflow)
+            return state
     
     async def send_response_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Generate and format response to user."""
@@ -408,8 +510,13 @@ class Workflow:
         print(f"Final order states: {order_states}")
         print(f"Next incomplete state: {next_incomplete_state}")
         
+        # NOTE: Memory saving moved to dedicated final node
+        
+        # 🔄 PRESERVAR TODOS LOS MENSAJES: Históricos + respuesta actual
+        all_messages = messages + [response]  # Mantener historial completo + nueva respuesta
+        
         return {
-            "messages": [response],
+            "messages": all_messages,  # 📝 Todos los mensajes preservados
             "order_states": order_states,  # Preserve states
             "active_order": active_order,   # Preserve active order
             # Individual state fields for ChatState compatibility
@@ -512,8 +619,10 @@ class Workflow:
             )
         
         context.extend(state["messages"])
-        print(f"Context built: {context}")
         
+        print(f"Context Loaded: ")
+        for message in context:
+            print(f"Message: {message}")
         return context
     
     def should_continue_after_intent(self, state: Dict[str, Any]) -> Literal["retrieve", "send"]:
