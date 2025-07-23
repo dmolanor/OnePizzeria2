@@ -9,9 +9,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field
+from telegram import Update
 from typing_extensions import TypedDict
 
-from .state import ChatState, Order, ProductDetails
+from .checkpointer import state_manager
+from .models import ChatState, Order, ProductDetails
 from .prompts import CustomerServicePrompts
 from .tools import SupabaseService
 
@@ -45,11 +47,17 @@ class Workflow:
         return graph.compile()
         
     
-    def detect_user_intent_step(self, state: ChatState) -> Dict[str, Any]:
+    async def detect_user_intent_step(self, update: Update, state: ChatState) -> Dict[str, Any]:
         print(f"Dividing message and identifying intent: {state["messages"][-1].content}")
         
         user_id = state["user_id"]
         costumer = self.supabase.get_client_by_phone_number(user_id)
+        
+        user = update.effective_user
+        new_message = state["messages"][-1].content if state["messages"] else ""
+        
+        complete_state = await state_manager.load_state_for_user(user.id, new_message)
+
         
         messages = [
             SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
