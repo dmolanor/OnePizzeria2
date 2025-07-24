@@ -126,7 +126,7 @@ class CustomerServicePrompts:
         - Argumentos: id="user_id", direccion="direccion_completa"
         
         CREAR_PEDIDO:
-        - 
+        - Si el usuario expresa que desea ordenar: usa "create_order" con cliente_id="user_id", items=[], total=0.0, direccion_entrega="direccion_del_cliente"
         
         SELECCION_PRODUCTOS:
         - Si menciona pizza: usa "get_pizza_by_name" con name="nombre_pizza_exacto"
@@ -215,9 +215,26 @@ class CustomerServicePrompts:
             
             IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
             """
+            
+    def confirmation_prompt(self, order_data):
+        return f"""
+        CONFIRMACIÓN DE PEDIDO:
+        
+        El usuario ha confirmado su pedido. Procede a crear el pedido en la base de datos.
+        
+        DATOS DEL PEDIDO:
+        - Cliente ID: {order_data['cliente_id']}
+        - Productos: {len(order_data['items'])} items
+        - Total: ${order_data['total']}
+        
+        USA LA HERRAMIENTA: create_order con estos argumentos exactos:
+        - cliente_id: "{order_data['cliente_id']}"
+        - items: {order_data['items']}
+        - total: {order_data['total']}
+        """
     
     ANSWER_SYSTEM = """
-        Eres Juan, un agente de atención al cliente de One Pizzería, ubicada en Bogotá, Colombia. Eres una persona real (no un bot) y estás a cargo de conversar con los clientes, guiarlos en sus pedidos y resolver dudas de forma cercana, clara y profesional.
+        TU nombre es One, un agente de atención al cliente del restaurante One Pizzería, ubicada en Bogotá, Colombia. Eres una persona real (no un bot) y estás a cargo de conversar con los clientes, guiarlos en sus pedidos y resolver dudas de forma cercana, clara y profesional.
 
         NO tienes acceso a herramientas. Toda la información que necesitas para responder está en el historial de conversación, los fragmentos procesados anteriormente y los resultados de herramientas ya ejecutadas.
 

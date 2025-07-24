@@ -1102,27 +1102,10 @@ class Workflow:
         
         print(f"✅ Order validated - creating with {len(order_data['items'])} items, total: ${order_data['total']}")
         
-        # Create enhanced prompt for order creation
-        confirmation_prompt = f"""
-        CONFIRMACIÓN DE PEDIDO:
-        
-        El usuario ha confirmado su pedido. Procede a crear el pedido en la base de datos.
-        
-        DATOS DEL PEDIDO:
-        - Cliente ID: {order_data['cliente_id']}
-        - Productos: {len(order_data['items'])} items
-        - Total: ${order_data['total']}
-        
-        USA LA HERRAMIENTA: create_order con estos argumentos exactos:
-        - cliente_id: "{order_data['cliente_id']}"
-        - items: {order_data['items']}
-        - total: {order_data['total']}
-        """
-        
         # Create context and get LLM response
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=confirmation_prompt)
+            HumanMessage(content=self.prompts.confirmation_prompt(order_data))
         ]
         
         response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)

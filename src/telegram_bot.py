@@ -107,13 +107,21 @@ class TelegramBot:
             
             # Get the last message from the response state
             if response_state and response_state.get("messages"):
-                response = response_state["messages"][-1].content
+                response = response_state["messages"][-1]
                 logger.info(f"Extracted response: {response}")
+                
+                # Check if the response has tool calls
+                #if hasattr(response, "tool_calls") and response.tool_calls:
+                #    for tool_call in response.tool_calls:
+                #        await self._handle_tool_response(update, tool_call)
+                #else:
+                    # Default text response
+                await update.message.reply_text(response.content)
             else:
-                response = "Lo siento, no pude procesar tu mensaje. ¿Podrías intentar de nuevo?"
+                await update.message.reply_text(
+                    "Lo siento, no pude procesar tu mensaje. ¿Podrías intentar de nuevo?"
+                )
                 logger.warning("No messages found in response state")
-            
-            await update.message.reply_text(response)
             
         except Exception as e:
             import traceback
@@ -122,6 +130,102 @@ class TelegramBot:
             logger.error(f"Full traceback:\n{error_traceback}")
             await update.message.reply_text(
                 "Lo siento, hubo un error procesando tu mensaje. Por favor, intenta de nuevo."
+            )
+
+    async def _handle_tool_response(self, update: Update, tool_call: dict) -> None:
+        """Handle different types of tool responses."""
+        try:
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
+            
+            if tool_name == "send_text_message":
+                await update.message.reply_text(
+                    tool_args["message"],
+                    parse_mode=tool_args.get("parse_mode", "HTML")
+                )
+                
+            elif tool_name == "send_image_message":
+                await update.message.reply_photo(
+                    photo=tool_args["image_url"],
+                    caption=tool_args.get("caption")
+                )
+                
+            elif tool_name == "send_inline_keyboard":
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+                # Create keyboard markup
+                keyboard = []
+                for row in tool_args["buttons"]:
+                    if isinstance(row, list):
+                        # Handle multiple buttons per row
+                        keyboard_row = [
+                            InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"])
+                            for btn in row
+                        ]
+                        keyboard.append(keyboard_row)
+                    else:
+                        # Single button per row
+                        keyboard.append([
+                            InlineKeyboardButton(row["text"], callback_data=row["callback_data"])
+                        ])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(
+                    tool_args["message"],
+                    reply_markup=reply_markup,
+                    parse_mode=tool_args.get("parse_mode", "HTML")
+                )
+                
+            elif tool_name == "send_menu_message":
+                await update.message.reply_text(
+                    tool_args["content"],
+                    parse_mode="HTML"
+                )
+                
+            elif tool_name == "send_order_summary":
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+                # Create confirmation buttons
+                keyboard = [
+                    [InlineKeyboardButton(btn["text"], callback_data=btn["callback_data"]) 
+                     for btn in tool_args["buttons"]]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    tool_args["message"],
+                    reply_markup=reply_markup,
+                    parse_mode="HTML"
+                )
+                
+            elif tool_name == "send_pdf_document":
+                # Verificar que el archivo existe
+                import os
+                file_path = tool_args["file_path"]
+                
+                if not os.path.exists(file_path):
+                    logger.error(f"PDF file not found: {file_path}")
+                    await update.message.reply_text(
+                        "Lo siento, no pude encontrar el menú en este momento. Por favor, intenta más tarde."
+                    )
+                    return
+                    
+                # Enviar el documento
+                with open(file_path, 'rb') as pdf:
+                    await update.message.reply_document(
+                        document=pdf,
+                        caption=tool_args.get("caption"),
+                        parse_mode=tool_args.get("parse_mode", "HTML")
+                    )
+            
+            else:
+                logger.warning(f"Unknown tool response type: {tool_name}")
+                await update.message.reply_text(str(tool_args))
+                
+        except Exception as e:
+            logger.error(f"Error handling tool response: {e}")
+            await update.message.reply_text(
+                "Lo siento, hubo un error al procesar la respuesta. Por favor, intenta de nuevo."
             )
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

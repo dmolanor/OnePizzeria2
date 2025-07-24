@@ -1,5 +1,7 @@
 import os
+
 from langchain_core.tools import tool
+
 from config import supabase
 
 #=========================================================#
@@ -328,12 +330,12 @@ def get_pizza_by_name_and_size(name: str, size: str) -> dict:
     
     Args:
         name: Nombre de la pizza a buscar (ej: "pepperoni", "hawaiana", "margherita")
-        size: Tamaño de la pizza a buscar (ej: "small", "mediana", "grande")
+        size: Tamaño de la pizza a buscar (ej: "Small", "Medium", "Large")
     Returns:
         dict: Datos de la pizza si existe
         
     Example:
-        get_pizza_by_name_and_size("pepperoni", "small")
+        get_pizza_by_name_and_size("pepperoni", "Small")
     """
     try:
         # Buscar con nombre exacto primero
@@ -547,9 +549,218 @@ def get_border_by_name( name: str) -> dict:
         return {"error": f"Error al buscar borde: {str(e)}"}
 
 
+#=========================================================#
+#-------------------- TELEGRAM TOOLS --------------------#
+#=========================================================#
+
+@tool
+def send_text_message(message: str, parse_mode: str = "HTML") -> dict:
+    """
+    Envía un mensaje de texto al usuario con formato opcional.
+    
+    Args:
+        message: Texto del mensaje a enviar
+        parse_mode: Modo de parseo del mensaje ("HTML" o "Markdown")
+        
+    Returns:
+        dict: Resultado de la operación
+        
+    Example:
+        send_text_message("¡Hola! Tu <b>pizza</b> está lista", parse_mode="HTML")
+    """
+    try:
+        return {
+            "type": "text_message",
+            "content": message,
+            "parse_mode": parse_mode
+        }
+    except Exception as e:
+        return {"error": f"Error al enviar mensaje: {str(e)}"}
+
+@tool
+def send_image_message(image_url: str, caption: str = None) -> dict:
+    """
+    Envía una imagen al usuario con un pie de foto opcional.
+    
+    Args:
+        image_url: URL o path de la imagen a enviar
+        caption: Texto opcional para el pie de foto
+        
+    Returns:
+        dict: Resultado de la operación
+        
+    Example:
+        send_image_message("https://example.com/pizza.jpg", "¡Tu pizza está lista!")
+    """
+    try:
+        return {
+            "type": "image_message",
+            "image_url": image_url,
+            "caption": caption
+        }
+    except Exception as e:
+        return {"error": f"Error al enviar imagen: {str(e)}"}
+
+@tool
+def send_inline_keyboard(message: str, buttons: list) -> dict:
+    """
+    Envía un mensaje con botones inline.
+    
+    Args:
+        message: Texto del mensaje
+        buttons: Lista de diccionarios con los botones. Formato:
+                [{"text": "Texto botón", "callback_data": "data"}]
+        
+    Returns:
+        dict: Resultado de la operación
+        
+    Example:
+        send_inline_keyboard(
+            "Elige un tamaño:",
+            [
+                {"text": "Pequeña", "callback_data": "size_small"},
+                {"text": "Mediana", "callback_data": "size_medium"},
+                {"text": "Grande", "callback_data": "size_large"}
+            ]
+        )
+    """
+    try:
+        return {
+            "type": "inline_keyboard",
+            "message": message,
+            "buttons": buttons
+        }
+    except Exception as e:
+        return {"error": f"Error al enviar teclado: {str(e)}"}
+
+@tool
+def send_menu_message(title: str, items: list[dict], show_prices: bool = True) -> dict:
+    """
+    Envía un mensaje formateado como menú.
+    
+    Args:
+        title: Título del menú
+        items: Lista de items del menú. Formato:
+               [{"name": "Nombre", "description": "Desc", "price": 1000}]
+        show_prices: Si se deben mostrar los precios
+        
+    Returns:
+        dict: Resultado de la operación
+        
+    Example:
+        send_menu_message(
+            "🍕 Nuestras Pizzas",
+            [
+                {
+                    "name": "Pepperoni",
+                    "description": "Pepperoni y queso",
+                    "price": 25000
+                }
+            ]
+        )
+    """
+    try:
+        formatted_menu = f"<b>{title}</b>\n\n"
+        for item in items:
+            formatted_menu += f"• <b>{item['name']}</b>\n"
+            if item.get('description'):
+                formatted_menu += f"  {item['description']}\n"
+            if show_prices and item.get('price'):
+                formatted_menu += f"  💰 ${item['price']:,}\n"
+            formatted_menu += "\n"
+            
+        return {
+            "type": "text_message",
+            "content": formatted_menu,
+            "parse_mode": "HTML"
+        }
+    except Exception as e:
+        return {"error": f"Error al enviar menú: {str(e)}"}
+
+@tool
+def send_order_summary(order_data: dict) -> dict:
+    """
+    Envía un resumen formateado del pedido.
+    
+    Args:
+        order_data: Diccionario con los datos del pedido. Debe contener:
+                   - items: Lista de productos
+                   - total: Total del pedido
+                   - cliente_id: ID del cliente
+                   
+    Returns:
+        dict: Resultado de la operación
+        
+    Example:
+        send_order_summary({
+            "items": [{"pizza": "Pepperoni", "tamaño": "M", "precio": 25000}],
+            "total": 25000,
+            "cliente_id": "123456789"
+        })
+    """
+    try:
+        summary = "<b>🛍️ Resumen de tu pedido</b>\n\n"
+        
+        # Agregar items
+        for item in order_data.get("items", []):
+            if "pizza" in item:
+                summary += f"🍕 Pizza {item['pizza']} ({item.get('tamaño', 'N/A')})\n"
+            elif "bebida" in item:
+                summary += f"🥤 {item['bebida']}\n"
+            summary += f"   💰 ${item.get('precio', 0):,}\n\n"
+            
+        # Agregar total
+        summary += f"\n<b>Total: ${order_data.get('total', 0):,}</b>"
+        
+        # Agregar botones de confirmación
+        buttons = [
+            {"text": "✅ Confirmar Pedido", "callback_data": f"confirm_order_{order_data['cliente_id']}"},
+            {"text": "❌ Cancelar", "callback_data": f"cancel_order_{order_data['cliente_id']}"}
+        ]
+        
+        return {
+            "type": "inline_keyboard",
+            "message": summary,
+            "buttons": buttons,
+            "parse_mode": "HTML"
+        }
+    except Exception as e:
+        return {"error": f"Error al enviar resumen: {str(e)}"}
+
+@tool
+def send_pdf_document(file_path: str = None, caption: str = None) -> dict:
+    """
+    Envía un documento PDF al usuario.
+    
+    Args:
+        file_path: Ruta al archivo PDF. Si es None, se enviará el menú por defecto
+        caption: Texto opcional para acompañar el documento
+        
+    Returns:
+        dict: Resultado de la operación
+        
+    Example:
+        send_pdf_document(caption="Aquí tienes nuestro menú completo 📄")
+    """
+    try:
+        # Si no se proporciona un archivo, usar el menú por defecto
+        if file_path is None:
+            file_path = "menu one pizzeria.pdf"
+            
+        return {
+            "type": "document",
+            "file_path": file_path,
+            "caption": caption or "Aquí tienes nuestro menú 📄",
+            "parse_mode": "HTML"
+        }
+    except Exception as e:
+        return {"error": f"Error al enviar documento: {str(e)}"}
+
+# Actualizar las listas de herramientas
 CUSTOMER_TOOLS = [get_client_by_id, create_client, update_client]
 ORDER_TOOLS = [get_order_by_id, get_active_order_by_client, create_order, update_order, delete_order, finish_order]  # Removed get_menu - only use search_menu and send_full_menu
 MENU_TOOLS = [get_pizza_by_name, get_beverage_by_name, get_adition_by_name, get_border_by_name, get_combo_by_name, get_combos, get_borders, get_beverages]
+TELEGRAM_TOOLS = [send_text_message, send_image_message, send_inline_keyboard, send_menu_message, send_order_summary, send_pdf_document]
 
 # Complete tool list for the agent
-ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS
+ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS + TELEGRAM_TOOLS
