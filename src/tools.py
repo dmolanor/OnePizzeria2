@@ -1,10 +1,10 @@
 import os
-
 from langchain_core.tools import tool
-
 from config import supabase
 
-# PEDIDOS
+#=========================================================#
+#---------------------- ORDER TOOLS ----------------------#
+#=========================================================#
 
 @tool
 def get_order_by_id(id: int) -> dict:
@@ -20,15 +20,13 @@ def get_order_by_id(id: int) -> dict:
     try:
         result = supabase.table("pedidos_activos").select("*").eq("id", id).execute()
         if result.data:
-            return result.data[0]
+            return {"success": "Pedido encontrado", "data": result.data[0]}
         else:
             return {"error": f"Pedido con ID {id} no encontrado"}
     except Exception as e:
         return {"error": f"Error al buscar pedido: {str(e)}"}
 
-#@tool
-#def get_order_by_client_id( client_id: int) -> list[dict]:
-#    return supabase.table("pedidos_activos").select("*").eq("cliente_id", client_id).execute().data
+
 @tool
 def get_active_order_by_client(cliente_id: str) -> dict:
     """
@@ -185,12 +183,15 @@ def finish_order(cliente_id: str) -> dict:
     except Exception as e:
         return {"error": f"Error al finalizar pedido: {str(e)}"}
 
+#==========================================================#
+#---------------------- CLIENT TOOLS ----------------------#
+#==========================================================#
 
-# CLIENTES
+
 @tool
 def get_client_by_id(user_id: str) -> dict:
     """
-    Obtiene un cliente por su ID de Telegram.
+    Retorna la información de un cliente a partir de su ID de Telegram.
     
     Args:
         user_id: El ID del usuario de Telegram (como string)
@@ -210,17 +211,17 @@ def get_client_by_id(user_id: str) -> dict:
     except Exception as e:
         return {"error": f"Error al buscar cliente: {str(e)}"}
 
-#@tool
-#def get_client_by_full_name( full_name: str) -> dict:
-#    return supabase.table("clientes").select("*").eq("nombre_completo", full_name).execute().data[0]
+
+
 @tool
-def create_client(id: str, nombre_completo: str, telefono: str, direccion: str = None) -> dict:
+def create_client(id: str, nombre: str, apellido: str, telefono: str, direccion: str = None) -> dict:
     """
     Crea un nuevo cliente en la base de datos.
     
     Args:
         id: ID del usuario de Telegram (string)
-        nombre_completo: Nombre completo del cliente (string)
+        nombre: Nombre del cliente (string)
+        apellido: Apellido del cliente (string)
         telefono: Número de teléfono (string)  
         direccion: Dirección del cliente (string, opcional)
         
@@ -228,17 +229,13 @@ def create_client(id: str, nombre_completo: str, telefono: str, direccion: str =
         dict: Resultado de la operación
         
     Example:
-        create_client("7315133184", "Diego Molano", "3203782744", "Calle 127A #11B-76 Apto 401")
+        create_client("7315133184", "Diego", "Molano", "3203782744", "Calle 127A #11B-76 Apto 401")
     """
     try:
-        # Split nombre_completo into nombre and apellido (required by DB schema)
-        parts = nombre_completo.split(" ", 1)
-        nombre = parts[0] if parts else ""
-        apellido = parts[1] if len(parts) > 1 else ""
         
         client_data = {
             "id": id,
-            "nombre_completo": nombre_completo,
+            "nombre_completo": nombre + " " + apellido,
             "nombre": nombre,
             "apellido": apellido,
             "telefono": telefono
@@ -253,37 +250,31 @@ def create_client(id: str, nombre_completo: str, telefono: str, direccion: str =
         return {"error": f"Error al crear cliente: {str(e)}"}
 
 @tool  
-def update_client(id: str, nombre_completo: str = None, telefono: str = None, direccion: str = None) -> dict:
+def update_client(id: str, nombre:str = None, apellido: str = None, telefono: str = None, correo:str = None, direccion: str = None) -> dict:
     """
-    Actualiza un cliente existente en la base de datos.
+    Actualiza la información de un cliente existente en la base de datos.
     
     Args:
         id: ID del usuario de Telegram (string) - requerido para identificar el cliente
-        nombre_completo: Nombre completo del cliente (string, opcional)
+        nombre: Nombre del cliente (string, opcional)
+        apellido: Apellido del cliente (string, opcional)
         telefono: Número de teléfono (string, opcional)
+        correo: Correo electrónico del cliente (string, opcional)
         direccion: Dirección del cliente (string, opcional)
         
     Returns:
         dict: Resultado de la operación
         
     Example:
-        update_client("7315133184", nombre_completo="Diego Molano", telefono="3203782744", direccion="Calle 127A #11B-76 Apto 401")
+        update_client("7315133184", nombre="Diego",  apellido="Molano", telefono="3203782744", correo="diegomolano@gmail.com", direccion="Calle 127A #11B-76 Apto 401")
     """
     try:
         update_data = {}
-        
-        if nombre_completo:
-            # Split nombre_completo into nombre and apellido
-            parts = nombre_completo.split(" ", 1)
-            nombre = parts[0] if parts else ""
-            apellido = parts[1] if len(parts) > 1 else ""
-            
-            update_data["nombre_completo"] = nombre_completo
-            update_data["nombre"] = nombre  
-            update_data["apellido"] = apellido
             
         if telefono:
             update_data["telefono"] = telefono  
+        if correo:
+            update_data["correo"] = correo
         if direccion:
             update_data["direccion"] = direccion
             
@@ -296,7 +287,10 @@ def update_client(id: str, nombre_completo: str = None, telefono: str = None, di
         return {"error": f"Error al actualizar cliente: {str(e)}"}
 
 
-# PIZZAS
+#========================================================#
+#---------------------- MENU TOOLS ----------------------#
+#========================================================#
+
 @tool
 def get_pizza_by_name(name: str) -> dict:
     """
@@ -320,31 +314,112 @@ def get_pizza_by_name(name: str) -> dict:
             result = supabase.table("pizzas_armadas").select("*").ilike("nombre", f"%{name}%").execute()
         
         if result.data:
-            return result.data[0]
+            return {"success": "Pizza encontrada", "data": result.data}
+        else:
+            return {"error": f"Pizza '{name}' no encontrada"}
+    except Exception as e:
+        return {"error": f"Error al buscar pizza: {str(e)}"}
+    
+
+@tool
+def get_pizza_by_name_and_size(name: str, size: str) -> dict:
+    """
+    Obtiene una pizza por su nombre desde la base de datos.
+    
+    Args:
+        name: Nombre de la pizza a buscar (ej: "pepperoni", "hawaiana", "margherita")
+        size: Tamaño de la pizza a buscar (ej: "small", "mediana", "grande")
+    Returns:
+        dict: Datos de la pizza si existe
+        
+    Example:
+        get_pizza_by_name_and_size("pepperoni", "small")
+    """
+    try:
+        # Buscar con nombre exacto primero
+        result = supabase.table("pizzas_armadas").select("*").eq("nombre", name).eq("tamano", size).execute()
+        
+        if not result.data:
+            # Buscar con ilike para mayor flexibilidad
+            result = supabase.table("pizzas_armadas").select("*").ilike("nombre", f"%{name}%").eq("tamano", size).execute()
+        
+        if result.data:
+            return {"success": "Pizza encontrada", "data": result.data}
         else:
             return {"error": f"Pizza '{name}' no encontrada"}
     except Exception as e:
         return {"error": f"Error al buscar pizza: {str(e)}"}
 
-#@tool
-#def get_pizzas_by_type( type: str) -> list[dict]:
-#    return supabase.table("pizzas_armadas").select("*").eq("tipo", type).execute().data
 
-# COMBOS
+@tool
+def get_combos(self) -> list[dict]:
+    """
+    Obtiene todos los combos disponibles en la base de datos.
+    
+    Returns:
+        dict: Datos de los combos disponibles
+        
+    Example:
+        get_combos()
+    """
+    try:
+        result = supabase.table("combos").select("*").execute().data
+        if result:
+            return {"success": "Combos encontrados", "data": result.data}
+        else:
+            return {"error": "No se encontraron combos"}
+    except Exception as e:
+        return {"error": f"Error al buscar combos: {str(e)}"}
 
-#@tool
-#def get_combos(self) -> list[dict]:
-#    return supabase.table("combos").select("*").execute().data
+@tool
+def get_combo_by_name(name: str) -> dict:
+    """
+    Obtiene información de un combo por su nombre desde la base de datos.
+    
+    Args:
+        name: Nombre del combo a buscar (ej: "combo 1", "combo 2", "combo 3")
+    Returns:
+        dict: Datos del combo si existe
+        
+    Example:    
+        get_combo_by_name("combo 1")
+    """
+    try:
+        # Buscar con nombre exacto primero
+        result = supabase.table("combos").select("*").eq("nombre", name).execute()
 
-#@tool
-#def get_combo_by_name( name: str) -> dict:
-#    return supabase.table("combos").select("*").eq("nombre", name).execute().data[0]
+        if not result.data:
+            # Buscar con ilike para mayor flexibilidad
+            result = supabase.table("combos").select("*").ilike("nombre", f"%{name}%").execute()
+        
+        if result.data:
+            return {"success": "Combo encontrado", "data": result.data}
+        else:
+            return {"error": f"Combo '{name}' no encontrado"}
+        
+    except Exception as e:
+        return {"error": f"Error al buscar combo: {str(e)}"}
 
-# BEBIDAS
 
-#@tool
-#def get_beverages(self) -> list[dict]:
-#    return supabase.table("bebidas").select("*").execute().data
+@tool
+def get_beverages(self) -> list[dict]:
+    """
+    Obtiene todas las bebidas disponibles en la base de datos.
+    
+    Returns:
+        dict: Datos de las bebidas disponibles
+        
+    Example:
+        get_beverages()
+    """
+    try:
+        result = supabase.table("bebidas").select("*").execute().data
+        if result:
+            return {"success": "Bebidas encontradas", "data": result.data}
+        else:
+            return {"error": "No se encontraron bebidas"}
+    except Exception as e:
+        return {"error": f"Error al buscar bebidas: {str(e)}"}
 
 @tool
 def get_beverage_by_name(name: str) -> dict:
@@ -375,40 +450,106 @@ def get_beverage_by_name(name: str) -> dict:
     except Exception as e:
         return {"error": f"Error al buscar bebida: {str(e)}"}
 
-#@tool
-#def get_beverages_by_sugar( sugar: bool) -> list[dict]:
-#    return supabase.table("bebidas").select("*").eq("azucar", sugar).execute().data
+@tool
+def get_aditions(self) -> list[dict]:
+    """
+    Obtiene todas las adiciones disponibles en la base de datos.
+    
+    Returns:
+        dict: Datos de las adiciones disponibles
+        
+    Example:
+        get_aditions()
+    """
+    try:
+        result = supabase.table("adiciones").select("*").execute().data
+        if result:
+            return {"success": "Adiciones encontradas", "data": result.data}
+        else:
+            return {"error": "No se encontraron adiciones"}
+    except Exception as e:
+        return {"error": f"Error al buscar adiciones: {str(e)}"}
+    
+@tool
+def get_adition_by_name( name: str) -> dict:
+    """
+    Obtiene una adición por su nombre desde la base de datos.
+    
+    Args:
+        name: Nombre de la adición a buscar (ej: "cebolla", "queso", "huevo")
+        
+    Returns:
+        dict: Datos de la adición si existe
+        
+    Example:
+        get_adition_by_name("cebolla")
+    """
+    try:
+        result = supabase.table("adiciones").select("*").eq("nombre", name).execute().data[0]
+        if not result:
+            result = supabase.table("adiciones").select("*").ilike("nombre", f"%{name}%").execute().data[0]
+        
+        if result:
+            return {"success": "Adición encontrada", "data": result}
+        else:
+            return {"error": f"Adición '{name}' no encontrada"}
+    except Exception as e:
+        return {"error": f"Error al buscar adición: {str(e)}"}
 
-#@tool
-#def get_beverages_by_alcohol( alcohol: bool) -> list[dict]:
-#    return supabase.table("bebidas").select("*").eq("alcohol", alcohol).execute().data
 
-# ADICIONES
+@tool
+def get_borders(self) -> list[dict]:
+    """
+    Obtiene todos los bordes disponibles en la base de datos.
+    
+    Returns:
+        dict: Datos de los bordes disponibles
+        
+    Example:
+        get_borders()
+    """
+    try:
+        result = supabase.table("bordes").select("*").execute().data
+        if result:
+            return {"success": "Bordes encontrados", "data": result.data}
+        else:
+            return {"error": "No se encontraron bordes"}
+    except Exception as e:
+        return {"error": f"Error al buscar bordes: {str(e)}"}
 
-#@tool
-#def get_aditions(self) -> list[dict]:
-#    return supabase.table("adiciones").select("*").execute().data
+@tool
+def get_border_by_name( name: str) -> dict:
+    """
+    Obtiene un borde por su nombre desde la base de datos.
+    
+    Args:
+        name: Nombre del borde a buscar (ej: "cebolla", "queso", "huevo")
+        
+    Returns:
+        dict: Datos del borde si existe
+        
+    Example:
+        get_border_by_name("cebolla")
+    """
+    try:
+        # Buscar con nombre exacto primero
+        result = supabase.table("bordes").select("*").eq("nombre", name).execute().data[0]
+        if not result:
+            # Buscar con ilike para mayor flexibilidad
+            result = supabase.table("bordes").select("*").ilike("nombre", f"%{name}%").execute().data[0]
+        
+        # Retornar el resultado si existe
+        if result:
+            return {"success": "Borde encontrado", "data": result}
+        else:
+            return {"error": f"Borde '{name}' no encontrado"}
+    except Exception as e:
+        return {"error": f"Error al buscar borde: {str(e)}"}
 
-#@tool
-#def get_adition_by_name( name: str) -> dict:
-#    return supabase.table("adiciones").select("*").eq("nombre", name).execute().data[0]
 
-# BORDES
-
-#@tool
-#def get_borders(self) -> list[dict]:
-#    return supabase.table("bordes").select("*").execute().data
-
-#@tool
-#def get_border_by_name( name: str) -> dict:
-#    return supabase.table("bordes").select("*").eq("nombre", name).execute().data[0]
-
-
-#CUSTOMER_TOOLS = [get_client_by_phone_number, get_client_by_full_name, create_client, update_client]
 CUSTOMER_TOOLS = [get_client_by_id, create_client, update_client]
-#ORDER_TOOLS = [get_orders, get_order_by_id, get_order_by_client_id, create_order, update_order, delete_order, finish_order]  # Removed get_menu - only use search_menu and send_full_menu
 ORDER_TOOLS = [get_order_by_id, get_active_order_by_client, create_order, update_order, delete_order, finish_order]  # Removed get_menu - only use search_menu and send_full_menu
-MENU_TOOLS = [get_pizza_by_name, get_beverage_by_name]
+MENU_TOOLS = [get_pizza_by_name, get_beverage_by_name, get_adition_by_name, get_border_by_name, get_combo_by_name, get_combos, get_borders, get_beverages]
 
 # Complete tool list for the agent
 ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS
