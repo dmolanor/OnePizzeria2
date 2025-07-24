@@ -280,59 +280,12 @@ class Workflow:
             "order_items": []
         })
         
-        # Create enhanced prompt with user context
-        enhanced_user_prompt = f"""
-        INFORMACIÓN DEL USUARIO:
-        - User ID: {user_id}
-        - Pedido actual: {active_order.get("order_items", [])}
-        
-        SECCIÓN A PROCESAR:
-        - Intent: {section["intent"]}
-        - Action: {section["action"]}
-        
-        INSTRUCCIONES ESPECÍFICAS:
-        
-        Si es "registro_datos_personales":
-        - Extrae nombre completo y teléfono del action
-        - Usa create_client con formato: {{"id": "{user_id}", "nombre_completo": "nombre", "telefono": "numero"}}
-        
-        Si es "registro_direccion":
-        - Extrae la dirección del action  
-        - Usa update_client con formato: {{"id": "{user_id}", "direccion": "direccion_completa"}}
-        
-        Si es "crear_pedido":
-        - SIEMPRE usa create_order para crear un pedido en pedidos_activos
-        - Usa create_order con formato: {{"cliente_id": "{user_id}", "items": [], "total": 0.0, "direccion_entrega": "direccion_del_cliente"}}
-        - CRÍTICO: Esto debe ejecutarse ANTES de agregar productos
-        
-        Si es "seleccion_productos":
-        - PRIMERO: Verifica si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
-        - Si NO existe pedido activo: USA create_order PRIMERO
-        - LUEGO: Si menciona pizza: usa get_pizza_by_name con name="nombre_pizza_exacto"
-        - LUEGO: Si menciona bebida: usa get_beverage_by_name con name="nombre_bebida_exacto"
-        - DESPUÉS de obtener productos: USA update_order para agregar al pedido activo
-        
-        Si es "confirmacion":
-        - Si confirma pedido y hay productos: usa update_order para actualizar dirección y método de pago
-        - IMPORTANTE: Solo actualizar pedido cuando el usuario CONFIRME explícitamente
-        
-        Si es "finalizacion":
-        - Si el usuario proporciona método de pago: usa finish_order con {{"cliente_id": "{user_id}"}}
-        - Esto moverá el pedido de activos a finalizados
-        
-        FLUJO CRÍTICO PARA PRODUCTOS:
-        1. Verificar pedido activo (get_active_order_by_client)
-        2. Si no existe → Crear pedido (create_order)
-        3. Buscar producto (get_pizza_by_name/get_beverage_by_name)
-        4. Actualizar pedido con producto (update_order)
-        
-        RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
-        """
-        
-        # Create context with enhanced instructions
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=enhanced_user_prompt)
+            HumanMessage(content=self.prompts.tool_execution_user(
+                section=section, 
+                active_order=active_order, 
+                user_id=user_id))
         ]
         
         # Handle different intent types
@@ -353,28 +306,12 @@ class Workflow:
         elif section["intent"] == "seleccion_productos":
             print("🔄 Detected seleccion_productos intent - searching for products and managing order")
             
-            # Enhanced prompt specifically for product selection
-            product_selection_prompt = f"""
-            SELECCIÓN DE PRODUCTOS - USUARIO: {user_id}
-            
-            ACCIÓN DEL USUARIO: {section["action"]}
-            
-            FLUJO OBLIGATORIO:
-            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
-            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{user_id}", "items": [], "total": 0.0}})
-            3. LUEGO: Buscar el producto mencionado:
-               - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
-               - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
-            4. El producto se agregará automáticamente al pedido en el siguiente paso
-            
-            EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
-            
-            IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
-            """
-            
             product_context = [
                 SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-                HumanMessage(content=product_selection_prompt)
+                HumanMessage(content=self.prompts.product_selection_prompt(
+                    section=section,
+                    user_id=user_id
+                ))
             ]
             
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(product_context)

@@ -18,7 +18,6 @@ class ProductDetails(BaseModel):
     total_price: float = 0.0
     
 
-
 class Order(BaseModel):
     order_id: str
     order_date: str
