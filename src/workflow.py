@@ -48,9 +48,9 @@ class Workflow:
                 "send": "send_response"
             }
         )
+        
+        # After retrieve_data, decide if tools are needed
         graph.add_conditional_edges(
-            "retrieve_data",
-            self.should_use_tools,
             "retrieve_data",
             self.should_use_tools,
             {
@@ -58,18 +58,23 @@ class Workflow:
                 "send": "send_response"
             }
         )
-        graph.add_edge("tools", "process_results")  # After tools, process results
-        graph.add_node("process_results", self.process_tool_results_step)
+        
+        # After tools, always process results
+        graph.add_edge("tools", "process_results")
+        
+        # After processing results, decide next action
         graph.add_conditional_edges(
             "process_results",
-            self.should_continue_processing,
+            self.should_continue_after_processing,
             {
-                "continue": "retrieve_data",  # Más elementos en divided_message
-                "send": "send_response"       # No más elementos, ir a respuesta
+                "retrieve": "retrieve_data",  # More messages to process
+                "send": "send_response"       # Done processing
             }
         )
-        graph.add_edge("send_response", "save_memory")  # 📤 Always save after response
-        graph.add_edge("save_memory", END)  # 📤 End after saving
+        
+        # After sending response, save memory and end
+        graph.add_edge("send_response", "save_memory")
+        graph.add_edge("save_memory", END)
         
         # Compile with async support
         return graph.compile()
@@ -196,14 +201,22 @@ class Workflow:
                 else:
                     existing_order_states["general"] = 1
             
-            # 🚫 REMOVED MANUAL MESSAGE COMBINATION - LangGraph handles this automatically
-            # The ChatState annotation already concatenates messages, so we don't need to manually combine them
+            # 🔄 PRESERVAR MENSAJES: Combinar mensajes históricos + mensaje actual del usuario
+            historical_messages = complete_state.get("messages", [])
+            current_user_message = state["messages"][-1] if state["messages"] else None
+            
+            # Si el mensaje actual del usuario no está ya en el historial, añadirlo
+            all_messages = historical_messages[:]  # Copia del historial
+            if current_user_message and (not historical_messages or 
+                historical_messages[-1].content != current_user_message.content):
+                all_messages.append(current_user_message)
+                print(f"✅ Added current user message to conversation history")
             
             result = {
                 "divided_message": divided,
                 "order_states": existing_order_states,
                 "customer": customer,
-                # No manual message manipulation - let LangGraph handle it
+                "messages": all_messages,  # 📝 Mensajes históricos + mensaje actual
                 "active_order": state.get("active_order", {}),  # Preserve active_order
                 # Individual state fields for ChatState compatibility
                 "saludo": existing_order_states.get("saludo", 0),
@@ -326,15 +339,62 @@ class Workflow:
         if section["intent"] == "confirmacion":
             print("🔄 Detected confirmation intent - handling order confirmation")
             confirmation_result = await self._handle_order_confirmation(state, section)
-            # 🚫 REMOVED MANUAL MESSAGE ADDITION - LangGraph handles this automatically
-            updated_state = {"messages": confirmation_result["messages"]}  # Only return new messages
-        else:   
+            updated_state = {"messages": list(state["messages"]) + confirmation_result["messages"]}
+        elif section["intent"] == "crear_pedido":
+            print("🔄 Detected crear_pedido intent - ensuring order exists in database")
+            response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
+            updated_state = {"messages": list(state["messages"]) + [response]}
+            
+            # Log tool usage for order creation
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                print(f"🔧 CREATING ORDER: {[tc['name'] for tc in response.tool_calls]}")
+                for tool_call in response.tool_calls:
+                    print(f"Order Creation Tool: {tool_call['name']}, Args: {tool_call['args']}")
+        elif section["intent"] == "seleccion_productos":
+            print("🔄 Detected seleccion_productos intent - searching for products and managing order")
+            
+            # Enhanced prompt specifically for product selection
+            product_selection_prompt = f"""
+            SELECCIÓN DE PRODUCTOS - USUARIO: {user_id}
+            
+            ACCIÓN DEL USUARIO: {section["action"]}
+            
+            FLUJO OBLIGATORIO:
+            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
+            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{user_id}", "items": [], "total": 0.0}})
+            3. LUEGO: Buscar el producto mencionado:
+               - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
+               - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
+            4. El producto se agregará automáticamente al pedido en el siguiente paso
+            
+            EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
+            
+            IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
+            """
+            
+            product_context = [
+                SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
+                HumanMessage(content=product_selection_prompt)
+            ]
+            
+            response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(product_context)
+            updated_state = {"messages": list(state["messages"]) + [response]}
+            
+            # Log tool usage for product selection
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                print(f"🔧 PRODUCT SELECTION: {[tc['name'] for tc in response.tool_calls]}")
+                for tool_call in response.tool_calls:
+                    print(f"Product Tool: {tool_call['name']}, Args: {tool_call['args']}")
+                    if tool_call['name'] in ['get_pizza_by_name', 'get_beverage_by_name']:
+                        print(f"🍕 Searching for product: {tool_call['args']}")
+            else:
+                print("⚠️ No tools called for product selection")
+        else:
             print(f"Sending enhanced prompt to LLM with tools...")
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
             
             print(f"Response retrieve_data_step: {response}")
-            # 🚫 REMOVED MANUAL MESSAGE ADDITION - LangGraph handles this automatically
-            updated_state = {"messages": [response]}  # Only return the new message
+            updated_state = {"messages": list(state["messages"]) + [response]}
             
             # Check for tool calls
             if hasattr(response, "tool_calls") and response.tool_calls:
@@ -507,16 +567,7 @@ class Workflow:
         next_incomplete_state = self._get_next_incomplete_state(order_states, order_items)
         
         # Build context based on current state and next action needed
-        print(f"📊 ANTES DE BUILD_CONVERSATION_CONTEXT:")
-        print(f"   - Total mensajes en estado: {len(messages)}")
-        for i, msg in enumerate(messages):
-            role = "👤 Usuario" if hasattr(msg, '__class__') and 'Human' in str(msg.__class__) else "🤖 Agente"
-            content_preview = msg.content[:30] + "..." if len(msg.content) > 30 else msg.content
-            print(f"   {i+1}. {role}: {content_preview}")
-        
         context = self._build_conversation_context(state)
-        if context is None:
-            context = []
         
         # Add order information to context if there are products
         if len(order_items) > 0:
@@ -556,10 +607,11 @@ class Workflow:
         
         # NOTE: Memory saving moved to dedicated final node
         
-        # 🚫 REMOVED MANUAL MESSAGE ADDITION - LangGraph handles this automatically
+        # 🔄 PRESERVAR TODOS LOS MENSAJES: Históricos + respuesta actual
+        all_messages = messages + [response]  # Mantener historial completo + nueva respuesta
         
         return {
-            "messages": [response],  # Only return the new response message
+            "messages": all_messages,  # 📝 Todos los mensajes preservados
             "order_states": order_states,  # Preserve states
             "active_order": active_order,   # Preserve active order
             # Individual state fields for ChatState compatibility
@@ -669,18 +721,7 @@ class Workflow:
                         "Usar siempre user_id para utilizar herramientas que lo requieran"
             )
         )
-        if state["order_states"]["registro_datos_personales"] == 2:
-            context.append(
-                SystemMessage(
-                    content=f"El cliente ya está registrado, no pidas datos personales nuevamente."
-                )
-            )
-        else:
-            context.append(
-                SystemMessage(
-                    content=f"El cliente no está registrado, pide datos personales."
-                )
-            )
+        
         if state.get("customer"):
             context.append(
                 SystemMessage(
@@ -690,8 +731,10 @@ class Workflow:
         
         context.extend(state["messages"])
         
+        print(f"Context Loaded: ")
+        for message in context:
+            print(f"Message: {message}")
         return context
-        
     
     def should_continue_after_intent(self, state: Dict[str, Any]) -> Literal["retrieve", "send"]:
         """Determine if we should continue processing or send response after intent detection."""
@@ -725,23 +768,12 @@ class Workflow:
         
         # Check if the last message has tool calls
         if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            print(f"🔧 Found tool calls: {[tc['name'] for tc in last_message.tool_calls]}")
+            print(f"Found tool calls: {[tc['name'] for tc in last_message.tool_calls]}")
             return "tools"
         
-        # If no tool calls, go directly to send response
-        print("ℹ️ No tool calls needed, going to send response")
+        # No tools needed, go directly to response
+        print("No tools needed for this message")
         return "send"
-
-    def should_continue_processing(self, state: Dict[str, Any]) -> Literal["continue", "send"]:
-        """Determine if we should continue processing divided_message or send response."""
-        divided_message = state.get("divided_message", [])
-        
-        if divided_message:
-            print(f"📋 Still have {len(divided_message)} sections to process, continuing...")
-            return "continue"
-        else:
-            print("✅ All sections processed, going to send response")
-            return "send"
 
     async def process_tool_results_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Process tool execution results and sync with pedidos_activos."""
