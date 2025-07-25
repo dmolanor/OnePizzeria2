@@ -136,9 +136,8 @@ class Workflow:
             new_message = state["messages"][-1].content if state["messages"] else ""
             print(f"New message content: {new_message}")
             
-            # Get complete state for context (commented out for now)
+            # Get complete state for context
             complete_state = await state_manager.load_state_for_user(user_id, new_message)
-            #complete_state = {"messages": []}
             print(f"Complete state: {complete_state}")
             
             context = [
@@ -280,12 +279,13 @@ class Workflow:
             "order_items": []
         })
         
+        # Create enhanced prompt with user context
+        enhanced_user_prompt = self.prompts.enhance_user_prompt(user_id, active_order.get("order_items", []), section)
+        
+        # Create context with enhanced instructions
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tool_execution_user(
-                section=section, 
-                active_order=active_order, 
-                user_id=user_id))
+            HumanMessage(content=enhanced_user_prompt)
         ]
         
         # Handle different intent types
@@ -306,12 +306,28 @@ class Workflow:
         elif section["intent"] == "seleccion_productos":
             print("🔄 Detected seleccion_productos intent - searching for products and managing order")
             
+            # Enhanced prompt specifically for product selection
+            product_selection_prompt = f"""
+            SELECCIÓN DE PRODUCTOS - USUARIO: {user_id}
+            
+            ACCIÓN DEL USUARIO: {section["action"]}
+            
+            FLUJO OBLIGATORIO:
+            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
+            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{user_id}", "items": [], "total": 0.0}})
+            3. LUEGO: Buscar el producto mencionado:
+               - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
+               - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
+            4. El producto se agregará automáticamente al pedido en el siguiente paso
+            
+            EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
+            
+            IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
+            """
+            
             product_context = [
                 SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-                HumanMessage(content=self.prompts.product_selection_prompt(
-                    section=section,
-                    user_id=user_id
-                ))
+                HumanMessage(content=product_selection_prompt)
             ]
             
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(product_context)
@@ -1102,10 +1118,13 @@ class Workflow:
         
         print(f"✅ Order validated - creating with {len(order_data['items'])} items, total: ${order_data['total']}")
         
+        # Create enhanced prompt for order creation
+        confirmation_prompt = self.prompts.confirmation_prompt(order_data)
+        
         # Create context and get LLM response
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.confirmation_prompt(order_data))
+            HumanMessage(content=confirmation_prompt)
         ]
         
         response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
