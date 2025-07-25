@@ -7,6 +7,51 @@ class CustomerServicePrompts:
     # Message splitting prompts
     MESSAGE_SPLITTING_SYSTEM = """Eres un divisor de mensajes por intención y semántica. 
                             Tu tarea es dividir un mensaje del usuario en una lista de mensajes, cada uno perteneciente a una intención y acción diferente, y retornar una lista de diccionarios.
+                            
+                            INSTRUCCIONES PARA CLASIFICACIÓN:
+            
+            Analiza el mensaje del usuario considerando TODO el contexto anterior y clasifica su intención en una de las siguientes categorías:
+            
+            - **saludo**: Saludos iniciales, presentaciones ("Hola", "Buenos días", etc.)
+            - **registro_datos_personales**: Proporciona nombre completo y/o teléfono
+            - **registro_direccion**: Proporciona o confirma dirección de entrega
+            - **consulta_menu**: Solicitudes de menú completo ("Me gustaría ver el menú", "Que hay de pizzas?", "Que bebidas ofrecen", etc.)
+            - **consulta_productos**: Consulta de productos específicos ("Cuanto cuesta la pizza de pepperoni?", "A cuanto la coca-cola?", etc.)
+            - **crear_pedido**: Crea un pedido nuevo (si no hay pedido) dada la intención del usuario y lo crea en la base de datos de pedidos_activos
+            - **seleccion_productos**: Solicita productos específicos para la orden ("quiero una pizza", "me das una coca cola")
+            - **confirmacion**: Confirma el pedido actual ("sí, está correcto", "confirmo", "está bien")
+            - **finalizacion**: Proporciona método de pago o finaliza el pedido
+            - **general**: Si no encaja en ninguna categoría anterior
+            
+            REGLAS IMPORTANTES:
+            1. Si un estado ya está COMPLETADO (valor 2), NO lo classifiques de nuevo a menos que el usuario explícitamente quiera cambiarlo
+            2. Si el mensaje es ambiguo, usa el contexto de la conversación para inferir la intención
+            3. Si el usuario dice "sí", "correcto", "está bien" después de mostrar productos, clasifícalo como "confirmacion"
+            4. Si el usuario menciona productos después de ya tener productos, puede ser "seleccion_productos" (agregar más) o "confirmacion" (confirmar los actuales)
+            
+            EJEMPLOS CON CONTEXTO:
+            
+            Ejemplo 1:
+            - Contexto: Cliente ya tiene pizza en el pedido
+            - Mensaje: "Sí, está correcto"
+            - Clasificación: {"intent": "confirmacion", "action": "confirma_pedido_actual"}
+            
+            Ejemplo 2:
+            - Contexto: No hay productos en el pedido
+            - Mensaje: "Quiero una pizza"
+            - Clasificación: {"intent": "seleccion_productos", "action": "solicita_pizza"}
+            
+            Ejemplo 3:
+            - Contexto: Cliente ya registrado con dirección
+            - Mensaje: "La dirección está bien"
+            - Clasificación: {"intent": "confirmacion", "action": "confirma_direccion"}
+            
+            Devuelve la respuesta en formato JSON como lista de diccionarios:
+            [
+                {"intent": "categoria", "action": "descripcion_de_la_accion"}
+            ]
+            
+            Si el mensaje tiene múltiples intenciones, sepáralas en diferentes diccionarios.
                             """
 
     def message_splitting_user(self, messages, order_states=None, customer_info=None, active_order=None):
@@ -61,51 +106,74 @@ class CustomerServicePrompts:
             PEDIDO ACTUAL:
             {order_context if order_context else "No hay productos en el pedido"}
             
-            INSTRUCCIONES PARA CLASIFICACIÓN:
-            
-            Analiza el mensaje del usuario considerando TODO el contexto anterior y clasifica su intención en una de las siguientes categorías:
-            
-            - **saludo**: Saludos iniciales, presentaciones ("Hola", "Buenos días", etc.)
-            - **registro_datos_personales**: Proporciona nombre completo y/o teléfono
-            - **registro_direccion**: Proporciona o confirma dirección de entrega
-            - **consulta_menu**: Pregunta sobre productos, precios, ingredientes, opciones disponibles
-            - **crear_pedido**: Crea un pedido nuevo (si no hay pedido) dada la intención del usuario y lo crea en la base de datos de pedidos_activos
-            - **seleccion_productos**: Solicita productos específicos ("quiero una pizza", "me das una coca cola")
-            - **confirmacion**: Confirma el pedido actual ("sí, está correcto", "confirmo", "está bien")
-            - **finalizacion**: Proporciona método de pago o finaliza el pedido
-            - **general**: Si no encaja en ninguna categoría anterior
-            
-            REGLAS IMPORTANTES:
-            1. Si un estado ya está COMPLETADO (valor 2), NO lo classifiques de nuevo a menos que el usuario explícitamente quiera cambiarlo
-            2. Si el mensaje es ambiguo, usa el contexto de la conversación para inferir la intención
-            3. Si el usuario dice "sí", "correcto", "está bien" después de mostrar productos, clasifícalo como "confirmacion"
-            4. Si el usuario menciona productos después de ya tener productos, puede ser "seleccion_productos" (agregar más) o "confirmacion" (confirmar los actuales)
-            
-            EJEMPLOS CON CONTEXTO:
-            
-            Ejemplo 1:
-            - Contexto: Cliente ya tiene pizza en el pedido
-            - Mensaje: "Sí, está correcto"
-            - Clasificación: {{"intent": "confirmacion", "action": "confirma_pedido_actual"}}
-            
-            Ejemplo 2:
-            - Contexto: No hay productos en el pedido
-            - Mensaje: "Quiero una pizza"
-            - Clasificación: {{"intent": "seleccion_productos", "action": "solicita_pizza"}}
-            
-            Ejemplo 3:
-            - Contexto: Cliente ya registrado con dirección
-            - Mensaje: "La dirección está bien"
-            - Clasificación: {{"intent": "confirmacion", "action": "confirma_direccion"}}
-            
-            Devuelve la respuesta en formato JSON como lista de diccionarios:
-            [
-                {{"intent": "categoria", "action": "descripcion_de_la_accion"}}
-            ]
-            
-            Si el mensaje tiene múltiples intenciones, sepáralas en diferentes diccionarios.
             """
-
+    
+    def enhance_user_prompt(self, user_id, order_items, section):
+        return f"""
+        INFORMACIÓN DEL USUARIO:
+        - User ID: {user_id}
+        - Pedido actual: {order_items}
+        
+        SECCIÓN A PROCESAR:
+        - Intent: {section["intent"]}
+        - Action: {section["action"]}
+        
+        INSTRUCCIONES ESPECÍFICAS:
+        
+        Si es "registro_datos_personales":
+        - Extrae nombre completo y teléfono del action
+        - Usa create_client con formato: {{"id": "{user_id}", "nombre_completo": "nombre", "telefono": "numero"}}
+        
+        Si es "registro_direccion":
+        - Extrae la dirección del action  
+        - Usa update_client con formato: {{"id": "{user_id}", "direccion": "direccion_completa"}}
+        
+        Si es "crear_pedido":
+        - SIEMPRE usa create_order para crear un pedido en pedidos_activos
+        - Usa create_order con formato: {{"cliente_id": "{user_id}", "items": [], "total": 0.0, "direccion_entrega": "direccion_del_cliente"}}
+        - CRÍTICO: Esto debe ejecutarse ANTES de agregar productos
+        
+        Si es "seleccion_productos":
+        - PRIMERO: Verifica si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
+        - Si NO existe pedido activo: USA create_order PRIMERO
+        - LUEGO: Si menciona pizza: usa get_pizza_by_name con name="nombre_pizza_exacto"
+        - LUEGO: Si menciona bebida: usa get_beverage_by_name con name="nombre_bebida_exacto"
+        - DESPUÉS de obtener productos: USA update_order para agregar al pedido activo
+        
+        Si es "confirmacion":
+        - Si confirma pedido y hay productos: usa update_order para actualizar dirección y método de pago
+        - IMPORTANTE: Solo actualizar pedido cuando el usuario CONFIRME explícitamente
+        
+        Si es "finalizacion":
+        - Si el usuario proporciona método de pago: usa finish_order con {{"cliente_id": "{user_id}"}}
+        - Esto moverá el pedido de activos a finalizados
+        
+        FLUJO CRÍTICO PARA PRODUCTOS:
+        1. Verificar pedido activo (get_active_order_by_client)
+        2. Si no existe → Crear pedido (create_order)
+        3. Buscar producto (get_pizza_by_name/get_beverage_by_name)
+        4. Actualizar pedido con producto (update_order)
+        
+        RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
+        """
+    
+    def confirmation_prompt(self, order_data):
+        return f"""
+        CONFIRMACIÓN DE PEDIDO:
+        
+        El usuario ha confirmado su pedido. Procede a crear el pedido en la base de datos.
+        
+        DATOS DEL PEDIDO:  
+        - Cliente ID: {order_data['cliente_id']}
+        - Productos: {len(order_data['items'])} items
+        - Total: ${order_data['total']}
+        
+        USA LA HERRAMIENTA: create_order con estos argumentos exactos:
+        - cliente_id: "{order_data['cliente_id']}"
+        - items: {order_data['items']}
+        - total: {order_data['total']}
+        """
+    
     TOOLS_EXECUTION_SYSTEM = """
         Eres un agente especializado en ejecutar herramientas para el proceso de pedidos de pizzería.
 
@@ -117,85 +185,60 @@ class CustomerServicePrompts:
         
         MAPEO DE INTENTS A HERRAMIENTAS:
         
-        REGISTRO_DATOS_PERSONALES:
-        - Si el usuario da nombre Y teléfono: usa "create_client" 
-        - Argumentos: id="user_id", nombre_completo="nombre", telefono="numero", direccion="direccion" (opcional)
+        Si es "registro_datos_personales":
+        - Extraer nombre, apellido y teléfono del action
+        - Usa create_client 
+        - Argumentos: id="user_id", nombre="nombre", apellido="apellido", telefono="numero"
         
-        REGISTRO_DIRECCION:
-        - Si el usuario da dirección: usa "update_client"
+        Si es "registro_direccion":
+        - Extraer dirección y usar "update_client"
         - Argumentos: id="user_id", direccion="direccion_completa"
         
-        CREAR_PEDIDO:
-        - Si el usuario expresa que desea ordenar: usa "create_order" con cliente_id="user_id", items=[], total=0.0, direccion_entrega="direccion_del_cliente"
+        Si es "consulta_menu":
+        - Si se solicita el menú completo: usa send_menu_message
+        - Si se solicitan bebidas: usa get_beverages
+        - Si se solicitan combos: usa get_combos
         
-        SELECCION_PRODUCTOS:
-        - Si menciona pizza: usa "get_pizza_by_name" con name="nombre_pizza_exacto"
-        - Si menciona bebida: usa "get_beverage_by_name" con name="nombre_bebida_exacto"
+        Si es "consulta_productos":
+        - Si menciona pizza: usa get_pizza_by_name con name="nombre_pizza_exacto"
+        - Si menciona pizza y tamaño: usa get_pizza_by_name_and_size con name="nombre_pizza_exacto", size="tamaño_pizza_exacto"
+        - Si menciona bebida: usa get_beverage_by_name con name="nombre_bebida_exacto"
+        - Si menciona adición: usa get_adition_by_name con name="nombre_adicion_exacto"
+        - Si menciona borde: usa get_border_by_name con name="nombre_borde_exacto"
+        - Si menciona combo: usa get_combo_by_name con name="nombre_combo_exacto"
         
-        CONFIRMACION:
-        - Si el usuario confirma su pedido: usa "create_order"
-        - Argumentos: cliente_id="user_id", items=[lista_productos_del_pedido_actual], total=total_calculado
-        - IMPORTANTE: Solo usar create_order cuando el usuario CONFIRME explícitamente su pedido
+        Si es "crear_pedido":
+        - SIEMPRE usa create_order para crear un pedido en pedidos_activos
+        - Usa create_order 
+        - Argumentos: user_id="user_id", items=[], total=0.0, direccion_entrega="direccion_del_cliente"
+        - CRÍTICO: Esto debe ejecutarse ANTES de agregar productos
+        
+        Si es "seleccion_productos":
+        - PRIMERO: Verifica si existe pedido activo con get_active_order_by_client(user_id: "user_id")
+        - Si NO existe pedido activo: USA create_order(user_id="user_id", items=[], total=0.0, direccion_entrega="direccion_del_cliente") PRIMERO
+        - LUEGO: Si menciona pizza: usa get_pizza_by_name con name="nombre_pizza_exacto"
+                 Si menciona pizza y tamaño: usa get_pizza_by_name_and_size con name="nombre_pizza_exacto", size="tamaño_pizza_exacto"
+        - LUEGO: Si menciona bebida: usa get_beverage_by_name con name="nombre_bebida_exacto"
+        - DESPUÉS de obtener productos: USA update_order para agregar al pedido activo
+        
+        Si es "confirmacion":
+        - Si confirma pedido y hay productos: usa update_order para actualizar dirección y método de pago
+        - IMPORTANTE: Solo actualizar pedido cuando el usuario CONFIRME explícitamente
+        
+        Si es "finalizacion":
+        - Si el usuario proporciona método de pago: usa finish_order con user_id="user_id"
+        - Esto moverá el pedido de activos a finalizados
         
         EJEMPLOS DE USO:
         
         Para selección: get_pizza_by_name(name="diabola")
-        Para confirmación: create_order(cliente_id="7315133184", items=[{"pizza": "diabola", "tamaño": "medium", "precio": 45000}], total=45000.0)
+        Para confirmación: update_order(cliente_id="7315133184", items=[{"pizza": "diabola", "tamaño": "medium", "precio": 45000}], total=45000.0, metodo_pago="efectivo")
         
         RECUERDA: 
         - Extrae nombres exactos de productos del texto del usuario
         - Solo confirma pedidos cuando el usuario diga "confirmo", "está bien", "correcto", etc.
         - Usa argumentos específicos, nunca argumentos vacíos {{}}
         """
-
-    def tools_execution_user(self, section, active_order, user_id):
-        return f"""
-            INFORMACIÓN DEL USUARIO:
-            - User ID: {user_id}
-            - Pedido actual: {active_order.get("order_items", [])}
-            
-            SECCIÓN A PROCESAR:
-            - Intent: {section["intent"]}
-            - Action: {section["action"]}
-            
-            INSTRUCCIONES ESPECÍFICAS:
-            
-            Si es "registro_datos_personales":
-            - Extrae nombre completo y teléfono del action
-            - Usa create_client con formato: {{"id": "{user_id}", "nombre_completo": "nombre", "telefono": "numero"}}
-            
-            Si es "registro_direccion":
-            - Extrae la dirección del action
-            - Usa update_client con formato: {{"id": "{user_id}", "direccion": "direccion_completa"}}
-            
-            Si es "crear_pedido":
-            - SIEMPRE usa create_order para crear un pedido en pedidos_activos
-            - Usa create_order con formato: {{"cliente_id": "{user_id}", "items": [], "total": 0.0, "direccion_entrega": "direccion_del_cliente"}}
-            - CRÍTICO: Esto debe ejecutarse ANTES de agregar productos
-            
-            Si es "seleccion_productos":
-            - PRIMERO: Verifica si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
-            - Si NO existe pedido activo: USA create_order PRIMERO
-            - LUEGO: Si menciona pizza: usa get_pizza_by_name con name="nombre_pizza_exacto"
-            - LUEGO: Si menciona bebida: usa get_beverage_by_name con name="nombre_bebida_exacto"
-            - DESPUÉS de obtener productos: USA update_order para agregar al pedido activo
-            
-            Si es "confirmacion":
-            - Si confirma pedido y hay productos: usa update_order para actualizar dirección y método de pago
-            - IMPORTANTE: Solo actualizar pedido cuando el usuario CONFIRME explícitamente
-            
-            Si es "finalizacion":
-            - Si el usuario proporciona método de pago: usa finish_order con {{"cliente_id": "{user_id}"}}
-            - Esto moverá el pedido de activos a finalizados
-            
-            FLUJO CRÍTICO PARA PRODUCTOS:
-            1. Verificar pedido activo (get_active_order_by_client)
-            2. Si no existe → Crear pedido (create_order)
-            3. Buscar producto (get_pizza_by_name/get_beverage_by_name)
-            4. Actualizar pedido con producto (update_order)
-            
-            RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
-            """
         
     def product_selection_prompt(self, section, user_id):
         return f"""
