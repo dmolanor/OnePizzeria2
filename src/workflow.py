@@ -11,7 +11,8 @@ from config import supabase
 from src.checkpointer import state_manager
 from src.prompts import CustomerServicePrompts
 from src.state import ChatState, Order, ProductDetails
-from src.tools import ALL_TOOLS
+from src.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS, ORDER_TOOLS,
+                       TELEGRAM_TOOLS)
 
 
 class Workflow:
@@ -79,6 +80,10 @@ class Workflow:
         # Compile with async support
         return graph.compile()
 
+#=========================================================#
+#-------------------- GRAPH WORKFLOW --------------------#
+#=========================================================#
+
     async def detect_user_intent_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Detect user intent from message."""
         try:
@@ -139,7 +144,7 @@ class Workflow:
             # Get complete state for context (commented out for now)
             complete_state = await state_manager.load_state_for_user(user_id, new_message)
             #complete_state = {"messages": []}
-            print(f"Complete state: {complete_state}")
+            #print(f"Complete state: {complete_state}")
             
             context = [
                 SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
@@ -282,7 +287,7 @@ class Workflow:
         
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tool_execution_user(
+            HumanMessage(content=self.prompts.tools_execution_user(
                 section=section, 
                 active_order=active_order, 
                 user_id=user_id))
@@ -295,7 +300,7 @@ class Workflow:
             updated_state = {"messages": list(state["messages"]) + confirmation_result["messages"]}
         elif section["intent"] == "crear_pedido":
             print("🔄 Detected crear_pedido intent - ensuring order exists in database")
-            response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
+            response = await self.llm.bind_tools(ORDER_TOOLS).ainvoke(context)
             updated_state = {"messages": list(state["messages"]) + [response]}
             
             # Log tool usage for order creation
@@ -359,91 +364,6 @@ class Workflow:
         
         return updated_state
     
-    async def save_memory_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """📤 FINAL NODE: Save complete conversation to memory database."""
-        try:
-            user_id = state["user_id"]
-            messages = state.get("messages", [])
-            
-            print(f"💾 SAVING COMPLETE CONVERSATION TO MEMORY")
-            print(f"   - User ID: {user_id}")
-            print(f"   - Total messages to save: {len(messages)}")
-            
-            # 🔍 IDENTIFICAR MENSAJES NUEVOS QUE NO ESTÁN EN BD
-            from src.memory import memory
-
-            # Obtener conversación actual de la BD para comparar
-            existing_context = await memory.get_conversation(user_id)
-            existing_messages = existing_context.recent_messages
-            existing_count = len(existing_messages)
-            
-            print(f"   - Mensajes ya en BD: {existing_count}")
-            print(f"   - Mensajes en estado actual: {len(messages)}")
-            
-            # 📝 GUARDAR SOLO LOS MENSAJES NUEVOS (comparación por contenido)
-            # Crear set de contenidos existentes para comparación rápida
-            existing_contents = set()
-            for existing_msg in existing_messages:
-                existing_contents.add(f"{existing_msg['role']}:{existing_msg['content']}")
-            
-            new_messages_to_save = []
-            for message in messages:
-                role = "human" if hasattr(message, '__class__') and 'Human' in str(message.__class__) else "assistant"
-                message_key = f"{role}:{message.content}"
-                
-                # Solo agregar si no existe ya en la BD
-                if message_key not in existing_contents:
-                    new_messages_to_save.append(message)
-                    existing_contents.add(message_key)  # Evitar duplicados en esta sesión también
-            
-            print(f"   - Mensajes nuevos a guardar: {len(new_messages_to_save)}")
-            
-            if new_messages_to_save:
-                # Guardar cada mensaje nuevo individualmente
-                for i, message in enumerate(new_messages_to_save):
-                    try:
-                        await memory.add_message(user_id, message)
-                        role = "👤 Usuario" if hasattr(message, '__class__') and 'Human' in str(message.__class__) else "🤖 Agente"
-                        content_preview = message.content[:50] + "..." if len(message.content) > 50 else message.content
-                        print(f"   ✅ Guardado {i+1}/{len(new_messages_to_save)}: {role} - {content_preview}")
-                    except Exception as msg_error:
-                        print(f"   ❌ Error guardando mensaje {i+1}: {msg_error}")
-            else:
-                print(f"   ℹ️ No hay mensajes nuevos que guardar (todos ya existen)")
-            
-            # 🔄 ACTUALIZAR CONTEXTO DEL CLIENTE Y PEDIDO
-            try:
-                # Update customer context if we have relevant info
-                if state.get("customer") and state["customer"].get("nombre_completo"):
-                    await memory.update_customer_context(
-                        user_id, 
-                        "customer_name", 
-                        state["customer"]["nombre_completo"]
-                    )
-                    print(f"   ✅ Contexto del cliente actualizado")
-                
-                # Update order context if we have an active order
-                if state.get("active_order") and state["active_order"].get("order_items"):
-                    await memory.update_customer_context(
-                        user_id,
-                        "current_order",
-                        state["active_order"]
-                    )
-                    print(f"   ✅ Contexto del pedido actualizado")
-            except Exception as context_error:
-                print(f"   ⚠️ Error actualizando contexto: {context_error}")
-            
-            print(f"✅ Conversación completa guardada para usuario {user_id}")
-            
-            # Return the state unchanged (this is the final node)
-            return state
-            
-        except Exception as e:
-            print(f"⚠️ Error saving conversation to memory: {e}")
-            import traceback
-            print(f"Full traceback:\n{traceback.format_exc()}")
-            # Return state even if saving fails (don't break the workflow)
-            return state
     
     async def send_response_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Generate and format response to user."""
@@ -562,6 +482,92 @@ class Workflow:
             "finalizacion": order_states.get("finalizacion", 0),
             "general": order_states.get("general", 0)
         }
+        
+    async def save_memory_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """📤 FINAL NODE: Save complete conversation to memory database."""
+        try:
+            user_id = state["user_id"]
+            messages = state.get("messages", [])
+            
+            print(f"💾 SAVING COMPLETE CONVERSATION TO MEMORY")
+            print(f"   - User ID: {user_id}")
+            print(f"   - Total messages to save: {len(messages)}")
+            
+            # 🔍 IDENTIFICAR MENSAJES NUEVOS QUE NO ESTÁN EN BD
+            from src.memory import memory
+
+            # Obtener conversación actual de la BD para comparar
+            existing_context = await memory.get_conversation(user_id)
+            existing_messages = existing_context.recent_messages
+            existing_count = len(existing_messages)
+            
+            print(f"   - Mensajes ya en BD: {existing_count}")
+            print(f"   - Mensajes en estado actual: {len(messages)}")
+            
+            # 📝 GUARDAR SOLO LOS MENSAJES NUEVOS (comparación por contenido)
+            # Crear set de contenidos existentes para comparación rápida
+            existing_contents = set()
+            for existing_msg in existing_messages:
+                existing_contents.add(f"{existing_msg['role']}:{existing_msg['content']}")
+            
+            new_messages_to_save = []
+            for message in messages:
+                role = "human" if hasattr(message, '__class__') and 'Human' in str(message.__class__) else "assistant"
+                message_key = f"{role}:{message.content}"
+                
+                # Solo agregar si no existe ya en la BD
+                if message_key not in existing_contents:
+                    new_messages_to_save.append(message)
+                    existing_contents.add(message_key)  # Evitar duplicados en esta sesión también
+            
+            print(f"   - Mensajes nuevos a guardar: {len(new_messages_to_save)}")
+            
+            if new_messages_to_save:
+                # Guardar cada mensaje nuevo individualmente
+                for i, message in enumerate(new_messages_to_save):
+                    try:
+                        await memory.add_message(user_id, message)
+                        role = "👤 Usuario" if hasattr(message, '__class__') and 'Human' in str(message.__class__) else "🤖 Agente"
+                        content_preview = message.content[:50] + "..." if len(message.content) > 50 else message.content
+                        print(f"   ✅ Guardado {i+1}/{len(new_messages_to_save)}: {role} - {content_preview}")
+                    except Exception as msg_error:
+                        print(f"   ❌ Error guardando mensaje {i+1}: {msg_error}")
+            else:
+                print(f"   ℹ️ No hay mensajes nuevos que guardar (todos ya existen)")
+            
+            # 🔄 ACTUALIZAR CONTEXTO DEL CLIENTE Y PEDIDO
+            try:
+                # Update customer context if we have relevant info
+                if state.get("customer") and state["customer"].get("nombre_completo"):
+                    await memory.update_customer_context(
+                        user_id, 
+                        "customer_name", 
+                        state["customer"]["nombre_completo"]
+                    )
+                    print(f"   ✅ Contexto del cliente actualizado")
+                
+                # Update order context if we have an active order
+                if state.get("active_order") and state["active_order"].get("order_items"):
+                    await memory.update_customer_context(
+                        user_id,
+                        "current_order",
+                        state["active_order"]
+                    )
+                    print(f"   ✅ Contexto del pedido actualizado")
+            except Exception as context_error:
+                print(f"   ⚠️ Error actualizando contexto: {context_error}")
+            
+            print(f"✅ Conversación completa guardada para usuario {user_id}")
+            
+            # Return the state unchanged (this is the final node)
+            return state
+            
+        except Exception as e:
+            print(f"⚠️ Error saving conversation to memory: {e}")
+            import traceback
+            print(f"Full traceback:\n{traceback.format_exc()}")
+            # Return state even if saving fails (don't break the workflow)
+            return state
     
     def _get_next_incomplete_state(self, order_states: Dict[str, int], order_items: List) -> str:
         """Determine the next incomplete state that needs to be addressed."""
@@ -665,12 +671,21 @@ class Workflow:
                     content=f"Esta es la información actual del cliente: {state['customer']}"
                 )
             )
-        
+        print("********************************************")
+        print("********************************************")
+        print("state['messages']")
+        print(state["messages"])
+        print("********************************************")
+        print("********************************************")
+        print(context)
+        print("********************************************")
+        print("********************************************")
+
         context.extend(state["messages"])
         
         print(f"Context Loaded: ")
-        for message in context:
-            print(f"Message: {message}")
+        #for message in context:
+        #    print(f"Message: {message}")
         return context
     
     def should_continue_after_intent(self, state: Dict[str, Any]) -> Literal["retrieve", "send"]:
@@ -759,7 +774,12 @@ class Workflow:
                 try:
                     import json
                     tool_result = json.loads(message.content)
-                    
+                    print("=============================================================")
+                    print("=============================================================")
+                    print("=============================================================")
+                    print(f"Tool result: {tool_result}")
+                    print("=============================================================")
+                    print("=============================================================")
                     # Handle different tool results
                     if "success" in tool_result:
                         success_msg = tool_result["success"]
