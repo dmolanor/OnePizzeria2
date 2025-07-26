@@ -158,8 +158,9 @@ class ChatStateManager:
             historical_messages = context.get_messages_for_llm()
             
             # Add the new message
-            new_human_message = HumanMessage(content=new_message)
-            all_messages = historical_messages + [new_human_message]
+            #new_human_message = HumanMessage(content=new_message)
+            #all_messages = historical_messages + [new_human_message]
+            all_messages = historical_messages
             
             # Determine current step and flags
             needs_customer_info = not customer or not customer.get("last_name")
@@ -190,7 +191,7 @@ class ChatStateManager:
             
             return ChatState(
                 user_id=user_id,
-                messages=[HumanMessage(content=new_message)],
+                #messages=[HumanMessage(content=new_message)],
                 customer={},
                 current_step="greeting",
                 active_order={},

@@ -1,13 +1,16 @@
+import asyncio
+import json
 import logging
 import signal
 import sys
 from typing import Any, Dict, Optional
 
 from langchain_core.messages import HumanMessage
-from telegram import Update
+from telegram import BotCommand, Update
 from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
+from src.memory import memory
 from src.state import ChatState
 from src.workflow import Workflow
 
@@ -33,6 +36,11 @@ class TelegramBot:
         self.workflow = Workflow()  # Initialize workflow
         self._setup_handlers()
         self._setup_shutdown_handlers()
+        
+        # Message grouping mechanism - prevents multiple responses for rapid messages
+        self.pending_tasks: Dict[str, asyncio.Task] = {}  # user_id -> processing task
+        self.pending_messages: Dict[str, List[str]] = {}  # user_id -> list of messages
+        self.message_delay = 3.0  # seconds to wait for additional messages
 
     def _setup_handlers(self) -> None:
         """Set up all command and message handlers."""
@@ -42,6 +50,15 @@ class TelegramBot:
         )
         self.application.add_handler(
             CommandHandler("help", self.help_command, block=False)
+        )
+        self.application.add_handler(
+            CommandHandler("clear", self.clear_command, block=False)  # 🧹 NEW
+        )
+        self.application.add_handler(
+            CommandHandler("info", self.info_command, block=False)    # 📊 NEW
+        )
+        self.application.add_handler(
+            CommandHandler("admin_clear", self.admin_clear_command, block=False)  # 🔧 NEW (ADMIN)
         )
         
         # Message handler for text messages with non-blocking execution
@@ -87,7 +104,12 @@ class TelegramBot:
         await update.message.reply_text(help_text)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle incoming messages."""
+        """
+        Handle incoming messages with 3-second grouping delay.
+        
+        Multiple consecutive messages from the same user within 3 seconds
+        will be grouped together and processed as a single request.
+        """
         try:
             # Get the user's message and info
             message_text = update.message.text
@@ -95,10 +117,67 @@ class TelegramBot:
             user_id = str(user.id)  # Convert to string as workflow expects string
             user_name = user.first_name
             
-            logger.info(f"Received message from {user_name} ({user_id}): {message_text}")
+            logger.info(f"📥 Received message from {user_name} ({user_id}): {message_text}")
             
-            # Process message through workflow asynchronously
-            initial_state = {"messages": [HumanMessage(content=message_text)], "user_id": user_id}
+            # Cancel any existing processing task for this user
+            if user_id in self.pending_tasks:
+                self.pending_tasks[user_id].cancel()
+                logger.info(f"⏹️ Cancelled previous processing task for user {user_id}")
+            
+            # Add message to pending messages for this user
+            if user_id not in self.pending_messages:
+                self.pending_messages[user_id] = []
+            self.pending_messages[user_id].append(message_text)
+            
+            logger.info(f"📋 Total pending messages for {user_name}: {len(self.pending_messages[user_id])}")
+            
+            # Create new delayed processing task
+            self.pending_tasks[user_id] = asyncio.create_task(
+                self._delayed_message_processing(update, user_id, user_name)
+            )
+            
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error(f"Error in handle_message: {str(e)}")
+            logger.error(f"Full traceback:\n{error_traceback}")
+            await update.message.reply_text(
+                "Lo siento, hubo un error procesando tu mensaje. Por favor, intenta de nuevo."
+            )
+    
+    async def _delayed_message_processing(self, update: Update, user_id: str, user_name: str) -> None:
+        """
+        Process messages after a delay, allowing for message grouping.
+        
+        Args:
+            update: The Telegram update object
+            user_id: User identifier
+            user_name: User's first name
+        """
+        try:
+            # Wait for the delay period
+            await asyncio.sleep(self.message_delay)
+            
+            # Get all pending messages for this user
+            messages = self.pending_messages.get(user_id, [])
+            if not messages:
+                logger.warning(f"No pending messages found for user {user_id}")
+                return
+            
+            # Clear pending messages for this user
+            self.pending_messages[user_id] = []
+            
+            # Combine multiple messages into one if needed
+            if len(messages) == 1:
+                combined_message = messages[0]
+                logger.info(f"🔄 Processing single message from {user_name}")
+            else:
+                combined_message = "\n".join(messages)
+                logger.info(f"🔄 Processing {len(messages)} grouped messages from {user_name}")
+                logger.info(f"📝 Combined message: {combined_message}")
+            
+            # Process combined message through workflow
+            initial_state = {"messages": [HumanMessage(content=combined_message)], "user_id": user_id}
             logger.info(f"Initial state created: {initial_state}")
             
             logger.info("Starting workflow execution...")
@@ -110,27 +189,40 @@ class TelegramBot:
                 response = response_state["messages"][-1]
                 logger.info(f"Extracted response: {response}")
                 
-                # Check if the response has tool calls
-                #if hasattr(response, "tool_calls") and response.tool_calls:
-                #    for tool_call in response.tool_calls:
-                #        await self._handle_tool_response(update, tool_call)
-                #else:
-                    # Default text response
+                # Send response to user
                 await update.message.reply_text(response.content)
+                logger.info(f"✅ Response sent to {user_name}")
             else:
                 await update.message.reply_text(
                     "Lo siento, no pude procesar tu mensaje. ¿Podrías intentar de nuevo?"
                 )
                 logger.warning("No messages found in response state")
             
+            # Clean up pending task
+            if user_id in self.pending_tasks:
+                del self.pending_tasks[user_id]
+                
+        except asyncio.CancelledError:
+            logger.info(f"⏹️ Message processing cancelled for user {user_id}")
+            # Don't re-raise CancelledError as it's expected behavior
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
-            logger.error(f"Error processing message: {str(e)}")
+            logger.error(f"Error in delayed message processing: {str(e)}")
             logger.error(f"Full traceback:\n{error_traceback}")
-            await update.message.reply_text(
-                "Lo siento, hubo un error procesando tu mensaje. Por favor, intenta de nuevo."
-            )
+            
+            try:
+                await update.message.reply_text(
+                    "Lo siento, hubo un error procesando tu mensaje. Por favor, intenta de nuevo."
+                )
+            except Exception as reply_error:
+                logger.error(f"Failed to send error message: {reply_error}")
+            
+            # Clean up on error
+            if user_id in self.pending_tasks:
+                del self.pending_tasks[user_id]
+            if user_id in self.pending_messages:
+                self.pending_messages[user_id] = []
 
     async def _handle_tool_response(self, update: Update, tool_call: dict) -> None:
         """Handle different types of tool responses."""
@@ -248,6 +340,178 @@ class TelegramBot:
             except Exception as e:
                 logger.error(f"Failed to send error message to user: {e}")
 
+    async def setup_bot_commands(self):
+        """Setup bot commands menu."""
+        commands = [
+            BotCommand("start", "Iniciar conversación con el bot"),
+            BotCommand("clear", "Borrar toda mi conversación y empezar de nuevo"),
+            BotCommand("help", "Mostrar ayuda del bot"),
+            BotCommand("info", "Ver información de mi cache"),
+        ]
+        await self.application.bot.set_my_commands(commands)
+    
+    async def clear_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        🧹 CLEAR USER CACHE COMMAND
+        
+        Allows users to completely clear their conversation history 
+        and start fresh with the bot.
+        """
+        try:
+            user = update.effective_user
+            user_id = str(user.id)
+            user_name = user.first_name
+            
+            logger.info(f"🧹 User {user_name} ({user_id}) requested cache clear")
+            
+            # Get cache info before clearing
+            cache_info = await memory.get_user_cache_info(user_id)
+            
+            # Clear the cache
+            success = await memory.clear_user_cache(user_id)
+            
+            if success:
+                if cache_info.get("message_count", 0) > 0:
+                    await update.message.reply_text(
+                        f"✅ **Cache limpiado completamente**\n\n"
+                        f"📊 **Datos eliminados:**\n"
+                        f"• Mensajes: {cache_info.get('message_count', 0)}\n"
+                        f"• Tamaño: {cache_info.get('cache_size_estimate', '0 KB')}\n"
+                        f"• Registros BD: {cache_info.get('database_records', 0)}\n\n"
+                        f"🎉 **¡Listo para empezar de nuevo!**\n"
+                        f"Escribe cualquier mensaje para iniciar una conversación completamente nueva.",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(
+                        "✅ **Cache verificado**\n\n"
+                        "No había datos anteriores almacenados. "
+                        "Tu conversación ya está completamente limpia.\n\n"
+                        "🎉 **¡Listo para empezar!**"
+                    )
+            else:
+                await update.message.reply_text(
+                    "❌ **Error al limpiar cache**\n\n"
+                    "Hubo un problema técnico. Por favor intenta de nuevo "
+                    "o contacta al administrador."
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in clear command: {e}")
+            await update.message.reply_text(
+                "❌ Error inesperado al limpiar el cache. "
+                "Por favor intenta de nuevo."
+            )
+    
+    async def info_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        📊 SHOW USER CACHE INFO COMMAND
+        
+        Shows users information about their cached data.
+        """
+        try:
+            user = update.effective_user
+            user_id = str(user.id)
+            
+            cache_info = await memory.get_user_cache_info(user_id)
+            
+            if cache_info.get("error"):
+                await update.message.reply_text(
+                    f"❌ Error obteniendo información: {cache_info['error']}"
+                )
+                return
+            
+            message_count = cache_info.get("message_count", 0)
+            cache_size = cache_info.get("cache_size_estimate", "0 KB")
+            last_activity = cache_info.get("last_activity", "Nunca")
+            
+            if message_count > 0:
+                await update.message.reply_text(
+                    f"📊 **Información de tu cache:**\n\n"
+                    f"💬 **Mensajes guardados:** {message_count}\n"
+                    f"💾 **Tamaño del cache:** {cache_size}\n"
+                    f"🕒 **Última actividad:** {last_activity}\n"
+                    f"🗃️ **Registros en BD:** {cache_info.get('database_records', 0)}\n\n"
+                    f"💡 **Tip:** Usa /clear para borrar todo y empezar de nuevo.",
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    "📊 **Cache limpio**\n\n"
+                    "No tienes datos anteriores almacenados. "
+                    "Tu próximo mensaje iniciará una conversación nueva."
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in info command: {e}")
+            await update.message.reply_text(
+                "❌ Error obteniendo información del cache."
+            )
+    
+    async def admin_clear_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        🔧 ADMIN CACHE MANAGEMENT COMMAND
+        
+        For admins to manage cache globally.
+        Format: /admin_clear [user_id|all]
+        """
+        try:
+            user = update.effective_user
+            user_id = str(user.id)
+            
+            # Check if user is admin - Configure your admin IDs here
+            ADMIN_IDS = ["123456789"]  # 🔧 TODO: Replace with actual admin Telegram IDs
+            
+            if user_id not in ADMIN_IDS:
+                await update.message.reply_text("❌ Solo administradores pueden usar este comando.")
+                return
+            
+            # Get command arguments
+            args = context.args
+            if not args:
+                await update.message.reply_text(
+                    "📖 **Uso:** `/admin_clear [user_id|all]`\n\n"
+                    "**Ejemplos:**\n"
+                    "• `/admin_clear 123456789` - Limpiar cache de usuario específico\n"
+                    "• `/admin_clear all` - Limpiar cache de todos los usuarios\n\n"
+                    "⚠️ **Advertencia:** Esta operación no se puede deshacer.",
+                    parse_mode='Markdown'
+                )
+                return
+            
+            target = args[0]
+            
+            if target.lower() == "all":
+                # Clear all cache
+                results = await memory.clear_all_cache()
+                await update.message.reply_text(
+                    f"🧹 **Cache global limpiado**\n\n"
+                    f"📊 **Resultados:**\n"
+                    f"```\n{json.dumps(results, indent=2, ensure_ascii=False)}\n```",
+                    parse_mode='Markdown'
+                )
+            else:
+                # Clear specific user cache
+                target_user_id = target
+                success = await memory.clear_user_cache(target_user_id)
+                
+                if success:
+                    await update.message.reply_text(
+                        f"✅ **Cache limpiado para usuario:** `{target_user_id}`",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ **Error limpiando cache para usuario:** `{target_user_id}`",
+                        parse_mode='Markdown'
+                    )
+                    
+        except Exception as e:
+            logger.error(f"Error in admin_clear command: {e}")
+            await update.message.reply_text(
+                f"❌ Error en comando admin: {str(e)}"
+            )
+
     def run_sync(self) -> None:
         """Run the bot synchronously with improved error handling."""
         logger.info("Starting Telegram bot...")
@@ -272,10 +536,53 @@ class TelegramBot:
     async def run(self) -> None:
         """Run the bot asynchronously."""
         logger.info("Starting bot asynchronously...")
+        
+        # Setup bot commands menu
+        await self.setup_bot_commands()
+        
         await self.application.run_polling(drop_pending_updates=True)
         
     async def stop(self) -> None:
         """Stop the bot gracefully."""
         logger.info("Stopping bot...")
+        
+        # Cancel all pending message processing tasks
+        if self.pending_tasks:
+            logger.info(f"⏹️ Cancelling {len(self.pending_tasks)} pending message tasks...")
+            for user_id, task in self.pending_tasks.items():
+                if not task.cancelled():
+                    task.cancel()
+                    logger.info(f"   Cancelled task for user {user_id}")
+            
+            # Wait a brief moment for tasks to clean up
+            await asyncio.sleep(0.1)
+            
+            # Clear the dictionaries
+            self.pending_tasks.clear()
+            self.pending_messages.clear()
+            logger.info("✅ All pending tasks cleared")
+        
         await self.application.stop()
         logger.info("Bot stopped successfully")
+    
+    def get_pending_messages_info(self) -> Dict[str, Any]:
+        """
+        Get information about pending messages for debugging.
+        
+        Returns:
+            Dictionary with pending tasks and messages information
+        """
+        return {
+            "active_tasks": len(self.pending_tasks),
+            "users_with_pending_messages": len(self.pending_messages),
+            "total_pending_messages": sum(len(msgs) for msgs in self.pending_messages.values()),
+            "message_delay_seconds": self.message_delay,
+            "user_details": {
+                user_id: {
+                    "pending_message_count": len(messages),
+                    "has_active_task": user_id in self.pending_tasks,
+                    "task_cancelled": user_id in self.pending_tasks and self.pending_tasks[user_id].cancelled()
+                }
+                for user_id, messages in self.pending_messages.items() if messages
+            }
+        }

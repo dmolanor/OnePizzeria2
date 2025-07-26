@@ -54,6 +54,7 @@ class ConversationContext:
         messages = []
         for msg_data in self.recent_messages:
             if msg_data["role"] == "human":
+                pass
                 messages.append(HumanMessage(content=msg_data["content"]))
             else:
                 messages.append(AIMessage(content=msg_data["content"]))
@@ -233,6 +234,130 @@ class MemoryManager:
             "created_at": context.created_at.isoformat(),
             "cache_hit": thread_id in self._cache
         }
+
+    async def clear_user_cache(self, user_id: str) -> bool:
+        """
+        🧹 CLEAR ALL CACHED DATA FOR A SPECIFIC USER
+        
+        This function completely removes:
+        - All conversation history
+        - Customer context 
+        - Session metadata
+        - Order states
+        - Any other cached information
+        
+        Use this when a user wants to start completely fresh.
+        """
+        try:
+            logger.info(f"🧹 CLEARING ALL CACHE FOR USER: {user_id}")
+            
+            # 1. Clear from conversations table
+            result1 = supabase.table("conversations").delete().eq("thread_id", user_id).execute()
+            logger.info(f"   ✅ Conversations cleared: {len(result1.data) if result1.data else 0} records")
+            
+            # 2. Clear from any other related tables (adjust table names as needed)
+            try:
+                # Clear customer data cache if separate table exists
+                result2 = supabase.table("customer_cache").delete().eq("user_id", user_id).execute()
+                logger.info(f"   ✅ Customer cache cleared: {len(result2.data) if result2.data else 0} records")
+            except Exception as e:
+                logger.info(f"   ℹ️  No customer_cache table or already clean: {e}")
+            
+            try:
+                # Clear order states cache if separate table exists  
+                result3 = supabase.table("order_states_cache").delete().eq("user_id", user_id).execute()
+                logger.info(f"   ✅ Order states cache cleared: {len(result3.data) if result3.data else 0} records")
+            except Exception as e:
+                logger.info(f"   ℹ️  No order_states_cache table or already clean: {e}")
+            
+            # 3. Clear from memory cache
+            if user_id in self._cache:
+                del self._cache[user_id]
+                logger.info(f"   ✅ In-memory cache cleared for user")
+            
+            logger.info(f"🎉 CACHE COMPLETELY CLEARED for user {user_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error clearing cache for user {user_id}: {e}")
+            return False
+    
+    async def clear_all_cache(self) -> dict:
+        """
+        🧹 CLEAR ALL CACHED DATA FOR ALL USERS (ADMIN FUNCTION)
+        
+        WARNING: This removes ALL conversation data for ALL users.
+        Use only for maintenance or testing.
+        """
+        try:
+            logger.warning("🧹 CLEARING ALL CACHE FOR ALL USERS - ADMIN OPERATION")
+            
+            results = {}
+            
+            # Clear conversations table
+            result1 = supabase.table("conversations").delete().neq("id", "impossible_id").execute()
+            results["conversations"] = len(result1.data) if result1.data else 0
+            
+            # Clear other cache tables
+            for table_name in ["customer_cache", "order_states_cache"]:
+                try:
+                    result = supabase.table(table_name).delete().neq("id", "impossible_id").execute()
+                    results[table_name] = len(result.data) if result.data else 0
+                except Exception as e:
+                    results[table_name] = f"Table not found or error: {e}"
+            
+            # Clear in-memory cache
+            self._cache.clear()
+            results["memory_cache"] = "cleared"
+            
+            logger.warning(f"🎉 ALL CACHE CLEARED - Results: {results}")
+            return results
+            
+        except Exception as e:
+            logger.error(f"❌ Error clearing all cache: {e}")
+            return {"error": str(e)}
+    
+    async def get_user_cache_info(self, user_id: str) -> dict:
+        """
+        📊 GET INFORMATION ABOUT CACHED DATA FOR A USER
+        
+        Useful for debugging and understanding what's stored.
+        """
+        try:
+            info = {
+                "user_id": user_id,
+                "conversation_exists": user_id in self._cache,
+                "database_records": 0,
+                "message_count": 0,
+                "last_activity": None,
+                "cache_size_estimate": "0 KB"
+            }
+            
+            # Check database
+            result = supabase.table("conversations").select("*").eq("thread_id", user_id).execute()
+            if result.data:
+                info["database_records"] = len(result.data)
+                if result.data[0].get("data"):
+                    conversation_data = json.loads(result.data[0]["data"])
+                    info["message_count"] = len(conversation_data.get("recent_messages", []))
+                    info["last_activity"] = conversation_data.get("last_activity")
+                    
+                    # Estimate cache size
+                    data_str = json.dumps(conversation_data)
+                    size_bytes = len(data_str.encode('utf-8'))
+                    info["cache_size_estimate"] = f"{size_bytes / 1024:.1f} KB"
+            
+            # Check memory
+            if user_id in self._cache:
+                context = self._cache[user_id]
+                info["memory_message_count"] = len(context.recent_messages)
+                info["memory_last_activity"] = context.last_activity.isoformat()
+            
+            return info
+            
+        except Exception as e:
+            logger.error(f"Error getting cache info for user {user_id}: {e}")
+            return {"error": str(e)}
 
 
 # Global instance

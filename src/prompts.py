@@ -28,6 +28,7 @@ class CustomerServicePrompts:
             2. Si el mensaje es ambiguo, usa el contexto de la conversación para inferir la intención
             3. Si el usuario dice "sí", "correcto", "está bien" después de mostrar productos, clasifícalo como "confirmacion"
             4. Si el usuario menciona productos después de ya tener productos, puede ser "seleccion_productos" (agregar más) o "confirmacion" (confirmar los actuales)
+            5. NO NECESITAS USAR NINGUNA HERRAMIENTA EN NINGUNA CIRCUNSTANCIA
             
             EJEMPLOS CON CONTEXTO:
             

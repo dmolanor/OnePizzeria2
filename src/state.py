@@ -189,12 +189,13 @@ def smart_message_reducer(existing: Sequence[BaseMessage], new: Sequence[BaseMes
         if existing_exact:
             print(f"⚠️ Exact duplicate skipped: {msg_type} - {msg.content[:50]}...")
             continue
-            
+        """    
         # 2. Check for semantic duplicates
         if MessageValidator.is_semantic_duplicate(msg, existing_list):
             print(f"⚠️ Semantic duplicate skipped: {msg_type} - {msg.content[:50]}...")
             continue
-            
+        """
+        
         # 3. Detect conversation patterns
         pattern = MessageValidator.detect_conversation_pattern(msg, existing_list[-3:])
         if pattern:
@@ -245,8 +246,8 @@ class ChatState(TypedDict):
     """
     
     # Core conversation data - NOW WITH ENHANCED SMART REDUCER
-    messages: Annotated[Sequence[BaseMessage], lambda x, y: x + y]
-    #messages: Annotated[Sequence[BaseMessage], smart_message_reducer]  # 🎯 Enhanced smart deduplication + validation
+    #messages: Annotated[Sequence[BaseMessage], lambda x, y: x + y]
+    messages: Annotated[Sequence[BaseMessage], smart_message_reducer]  # 🎯 Enhanced smart deduplication + validation
     user_id: str                                    # Unique identifier for the user
     
     # Contextual information
