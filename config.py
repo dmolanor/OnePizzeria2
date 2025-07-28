@@ -21,6 +21,18 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini-2024-07-18")
 # Telegram Configuration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+# LocationIQ Configuration
+LOCATIONIQ_TOKEN = os.getenv("LOCATIONIQ_TOKEN")
+RESTAURANT_LAT = 4.7235821
+RESTAURANT_LON = -74.0416399
+max_lat = 4.779974
+min_lat = 4.658535
+max_lon = -74.000675
+min_lon = -74.136503
+
+
+
+
 logging.info(f"GOOGLE_API_KEY loaded: {bool(GOOGLE_API_KEY)}")
 logging.info(f"Using LLM_MODEL: {GOOGLE_MODEL}")
 
