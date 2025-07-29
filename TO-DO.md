@@ -11,6 +11,8 @@
 11. Hacer pruebas de calidad y precisión
 12. Permitir human-in-the-loop
 13. Integrar con API de Toteat
+14. Considerar seguridad del código, la data y tratamiento de datos colombia
+15. Pensar en aspectos legales para facturación
 
 
 # Posibles lugares de Hosting

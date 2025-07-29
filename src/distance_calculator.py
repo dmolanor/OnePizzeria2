@@ -10,7 +10,7 @@ import requests
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (LOCATIONIQ_TOKEN, RESTAURANT_LAT, RESTAURANT_LON, max_lat,
-                    max_lon, min_lat, min_lon)
+                    max_lon, min_lat, min_lon, supabase)
 
 # --- Normalización de abreviaturas comunes en Colombia ---
 _ABBR = [
@@ -193,10 +193,7 @@ class DistanceCalculator:
         data = response.json()
         return data['routes'][0]['distance']
     
-    def calculate_delivery_fee(self, address):
-        parts = parse_colombian_address(address)
-        lat, lon = self.get_coordinates(parts.street_for_geocoder())
-        distance = self.calculate_driving_distance(lat, lon)
+    def calculate_delivery_fee(self, distance):
         if distance < 1000:
             return 10000
         elif distance < 2000:
@@ -205,6 +202,30 @@ class DistanceCalculator:
             return 20000
         else:
             return -1
+        
+    def run(self, address, cliente_id):
+        parts = parse_colombian_address(address)
+        lat, lon = self.get_coordinates(parts.street_for_geocoder())
+        distance = self.calculate_driving_distance(lat, lon)
+        fee = self.calculate_delivery_fee(distance)
+        
+        client_direcciones = supabase.table("direcciones_clientes").select("*").eq("cliente_id", cliente_id).execute()
+        if client_direcciones.data:
+            for direccion in client_direcciones.data:
+                if direccion["base_direccion"] == parts.street_for_geocoder():
+                    return fee
+        
+        result = supabase.table("direcciones_clientes").update({"direccion_completa": address,
+                                                                    "base_direccion": parts.street_for_geocoder(),
+                                                                    "detalles": parts.complements,
+                                                                    "ciudad": "Bogota",
+                                                                    "lat": lat,
+                                                                    "lon": lon,
+                                                                    "distancia": distance,
+                                                                    "is_default": True
+                                                                    }).eq("cliente_id", cliente_id).execute()
+       
+        return fee
             
 
 if __name__ == "__main__":
