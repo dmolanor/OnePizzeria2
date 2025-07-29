@@ -17,7 +17,7 @@ load_dotenv()
 class ChatState(TypedDict):
     
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    user_id: str
+    cliente_id: str
     divided_message: Optional[List[Dict[str, str]]] = None
     
 @tool 
@@ -73,9 +73,9 @@ def agente_divisor(state: ChatState) -> Dict[str, Any]:
                 "finalizacion": 0,
                 "general": 0
             }
-    user_id = state["user_id"]
+    cliente_id = state["cliente_id"]
     new_message = state["messages"][-1].content if state["messages"] else ""
-    complete_state = state_manager.load_state_for_user(user_id, new_message)
+    complete_state = state_manager.load_state_for_user(cliente_id, new_message)
     messages = [
                 SystemMessage(content=CustomerServicePrompts.MESSAGE_SPLITTING_SYSTEM),
                 HumanMessage(content=CustomerServicePrompts.message_splitting_user(
@@ -160,7 +160,7 @@ def should_continue(state: ChatState) -> str:
     return "retrieve"
 
 def send_response_step(state: ChatState) -> Dict[str, Any]:
-    user_id = state["user_id"]
+    cliente_id = state["cliente_id"]
     new_message = state["messages"][-1]
     #new_message = next((msg for msg in reversed(state["messages"]) if isinstance(msg, ToolMessage)), None)
     
@@ -229,8 +229,8 @@ def _build_conversation_context(state: ChatState) -> list:
     messages = []
     
     messages.append(SystemMessage(content=SYSTEM_PROMPT))
-    user_id = state["user_id"]
-    messages.append(SystemMessage(content=f"IMPORTANTE: EL user_id de este cliente es {user_id}. Usar siempre user_id para utilizar herramientas que lo requieran"))
+    cliente_id = state["cliente_id"]
+    messages.append(SystemMessage(content=f"IMPORTANTE: EL cliente_id de este cliente es {cliente_id}. Usar siempre cliente_id para utilizar herramientas que lo requieran"))
     
     #if state["customer"]:
     #    messages.append(SystemMessage(content=f"Esta es la información actual del cliente: {state['customer']}"))
@@ -258,4 +258,4 @@ graph.add_edge("send_response", END)
 
 
 app = graph.compile()
-app.invoke({"messages": input("User: "), "user_id": "123prueba"})
+app.invoke({"messages": input("User: "), "cliente_id": "123prueba"})

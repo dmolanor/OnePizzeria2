@@ -21,11 +21,11 @@ class Handles:
         # Define the order of required states
         required_states = [
             "saludo",
-            "registro_datos_personales", 
-            "registro_direccion",
             "crear_pedido",
             "seleccion_productos",
             "confirmacion",
+            "registro_datos_personales", 
+            "registro_direccion",
             "finalizacion"
         ]
         
@@ -105,11 +105,11 @@ class Handles:
         context = []
         
         context.append(SystemMessage(content=self.prompts.ANSWER_SYSTEM))
-        user_id = state["user_id"]
+        cliente_id = state["cliente_id"]
         context.append(
             SystemMessage(
-                content=f"IMPORTANTE: EL user_id de este cliente es {user_id}. "
-                        "Usar siempre user_id para utilizar herramientas que lo requieran"
+                content=f"IMPORTANTE: EL cliente_id de este cliente es {cliente_id}. "
+                        "Usar siempre cliente_id para utilizar herramientas que lo requieran"
             )
         )
         
@@ -140,7 +140,7 @@ class Handles:
 
         # Get existing active_order or create new one
         active_order_data = state.get("active_order", {
-            "order_id": f"order_{state.get('user_id', 'unknown')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "order_id": f"order_{state.get('cliente_id', 'unknown')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "order_date": datetime.now().isoformat(),
             "order_total": 0.0,
             "order_items": []
@@ -255,7 +255,7 @@ class Handles:
         
         return order
     
-    def _validate_and_prepare_order_for_creation(self, active_order_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    def _validate_and_prepare_order_for_creation(self, active_order_data: Dict[str, Any], cliente_id: str) -> Dict[str, Any]:
         """Validate active order and prepare it for create_order tool."""
         try:
             # Create structured Order object for validation
@@ -281,7 +281,7 @@ class Handles:
             
             # Return data ready for create_order tool
             return {
-                "cliente_id": user_id,
+                "cliente_id": cliente_id,
                 "items": items_for_tool,
                 "total": order.order_total
             }
@@ -289,17 +289,17 @@ class Handles:
         except Exception as e:
             print(f"Error validating order: {e}")
             return {
-                "cliente_id": user_id,
+                "cliente_id": cliente_id,
                 "items": [],
                 "total": 0.0
             }
 
     async def _handle_order_confirmation(self, state: Dict[str, Any], section: Dict[str, str]) -> Dict[str, Any]:
         """Handle order confirmation by creating order in database if products exist."""
-        user_id = state.get("user_id", "")
+        cliente_id = state.get("cliente_id", "")
         active_order = state.get("active_order", {})
         
-        print(f"🔄 Handling order confirmation for user {user_id}")
+        print(f"🔄 Handling order confirmation for user {cliente_id}")
         print(f"📦 Active order has {len(active_order.get('order_items', []))} items")
         
         # Check if there are products to confirm
@@ -308,7 +308,7 @@ class Handles:
             return {"messages": []}
         
         # Validate and prepare order for creation
-        order_data = self._validate_and_prepare_order_for_creation(active_order, user_id)
+        order_data = self._validate_and_prepare_order_for_creation(active_order, cliente_id)
         
         print(f"✅ Order validated - creating with {len(order_data['items'])} items, total: ${order_data['total']}")
         
