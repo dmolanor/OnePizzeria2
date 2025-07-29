@@ -3,7 +3,7 @@ import json
 import logging
 import signal
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from langchain_core.messages import HumanMessage
 from telegram import BotCommand, Update
@@ -13,6 +13,7 @@ from telegram.ext import (Application, CommandHandler, ContextTypes,
 from src.memory import memory
 from src.state import ChatState
 from src.workflow import Workflow
+from src.checkpointer import state_manager
 
 # Set higher logging level for httpx to avoid all GET and POST requests being logged
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -177,7 +178,10 @@ class TelegramBot:
                 logger.info(f"📝 Combined message: {combined_message}")
             
             # Process combined message through workflow
-            initial_state = {"messages": [HumanMessage(content=combined_message)], "user_id": user_id}
+            initial_state = await state_manager.load_state_for_user(user_id, HumanMessage(combined_message))
+            print(f"Initial state messages: {initial_state}")
+            initial_state["messages"] += [HumanMessage(combined_message)]
+            print(initial_state)
             logger.info(f"Initial state created: {initial_state}")
             
             logger.info("Starting workflow execution...")
