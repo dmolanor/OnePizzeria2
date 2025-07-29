@@ -28,41 +28,6 @@ class Workflow:
         self.workflow = self._build_workflow()
         self.handles = Handles()
     
-    def _extract_tool_result(self, tool_message: ToolMessage) -> Dict[str, Any]:
-        """
-        Extract and parse tool result from ToolMessage.
-        
-        Args:
-            tool_message: ToolMessage containing tool execution result
-            
-        Returns:
-            Dictionary with parsed tool result or empty dict if parsing fails
-        """
-        try:
-            import json
-            result = json.loads(tool_message.content)
-            print(f"✅ Parsed tool result for {tool_message.tool_call_id}: {result}")
-            return result
-        except (json.JSONDecodeError, AttributeError) as e:
-            print(f"❌ Failed to parse tool result: {e}")
-            return {}
-    
-    def _find_recent_tool_messages(self, messages: List[BaseMessage], limit: int = 5) -> List[ToolMessage]:
-        """
-        Find recent ToolMessage instances in the message list.
-        
-        Args:
-            messages: List of messages to search
-            limit: Maximum number of recent messages to check
-            
-        Returns:
-            List of ToolMessage instances found
-        """
-        tool_messages = []
-        for message in reversed(messages[-limit:]):
-            if isinstance(message, ToolMessage):
-                tool_messages.append(message)
-        return tool_messages
     
     def _build_workflow(self):
         """Build the workflow graph with async support."""
@@ -299,6 +264,7 @@ class Workflow:
         
         print(f"Processing section: {section}")
         print(f"User ID: {user_id}")
+        print(state)
         
         # Get existing order from state or create new one
         active_order = state.get("active_order", {
@@ -308,10 +274,14 @@ class Workflow:
             "order_items": []
         })
         
+        order_items = []
+        if active_order:
+            order_items = active_order.get("order_items", [])
+        
         # Create context with enhanced instructions
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tools_execution_user(user_id, active_order.get("order_items", []), section))
+            HumanMessage(content=self.prompts.tools_execution_user(user_id, order_items, section))
         ]
         
         # Handle different intent types
@@ -412,7 +382,7 @@ class Workflow:
         user_id = state.get("user_id", "unknown")
         
         # Get existing active_order or create new one with proper structure
-        active_order_data = state.get("active_order", {
+        active_order = state.get("active_order", {
             "order_id": f"order_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "order_date": datetime.now().isoformat(),
             "order_total": 0.0,
@@ -432,7 +402,12 @@ class Workflow:
             "general": 0
         })
         
-        print(f"Current order state: {len(active_order_data.get('order_items', []))} items, total: ${active_order_data.get('order_total', 0)}")
+        order_items, order_total = [], 0
+        if active_order:
+            order_items = active_order.get("order_items", [])
+            order_total = active_order.get("order_total", 0)
+        
+        print(f"Current order state: {len(order_items)} items, total: ${order_total}")
         print(f"Current order_states: {order_states}")
         
         # Track actions completed in this step
@@ -606,7 +581,7 @@ class Workflow:
             print("✅ Products added - marking seleccion_productos as completed (2)")
             
         return {
-            "active_order": active_order_data,
+            "active_order": active_order,
             "order_states": order_states,
             # Individual state fields for ChatState compatibility
             "saludo": order_states.get("saludo", 0),
@@ -646,8 +621,11 @@ class Workflow:
         # Get active order information
         active_order = state.get("active_order", {"order_items": [], "order_total": 0.0})
         print(f"Active order: {active_order}")
-        order_items = active_order.get("order_items", [])
-        order_total = active_order.get("order_total", 0.0)
+        
+        order_items, order_total = [], 0
+        if active_order:
+            order_items = active_order.get("order_items", [])
+            order_total = active_order.get("order_total", 0)
         
         messages = state.get("messages", [])
         

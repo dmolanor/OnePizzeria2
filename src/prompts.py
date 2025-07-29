@@ -186,46 +186,28 @@ class CustomerServicePrompts:
         
         RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
         """
-    
-    def confirmation_prompt(self, order_data):
-        return f"""
-        CONFIRMACIÓN DE PEDIDO:
-        
-        El usuario ha confirmado su pedido. Procede a crear el pedido en la base de datos.
-        
-        DATOS DEL PEDIDO:  
-        - Cliente ID: {order_data['cliente_id']}
-        - Productos: {len(order_data['items'])} items
-        - Total: ${order_data['total']}
-        
-        USA LA HERRAMIENTA: create_order con estos argumentos exactos:
-        - cliente_id: "{order_data['cliente_id']}"
-        - items: {order_data['items']}
-        - total: {order_data['total']}
-        """
-    
-    
+
         
     def product_selection_prompt(self, section, user_id):
         return f"""
-            SELECCIÓN DE PRODUCTOS - USUARIO: {user_id}
+        SELECCIÓN DE PRODUCTOS - USUARIO: {user_id}
+        
+        ACCIÓN DEL USUARIO: {section["action"]}
+        
+        FLUJO OBLIGATORIO:
+        1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
+        2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{user_id}", "items": [], "total": 0.0}})
+        3. LUEGO: Buscar el producto mencionado:
+            - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
+            - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
+        4. El producto se agregará automáticamente al pedido en el siguiente paso
+        
+        EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
+        
+        IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
+        """
             
-            ACCIÓN DEL USUARIO: {section["action"]}
-            
-            FLUJO OBLIGATORIO:
-            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
-            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{user_id}", "items": [], "total": 0.0}})
-            3. LUEGO: Buscar el producto mencionado:
-               - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
-               - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
-            4. El producto se agregará automáticamente al pedido en el siguiente paso
-            
-            EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
-            
-            IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
-            """
-            
-    def confirmation_prompt(self, order_data):
+    def confirmation_user(self, order_data):
         return f"""
         CONFIRMACIÓN DE PEDIDO:
         
@@ -255,7 +237,7 @@ class CustomerServicePrompts:
         5. Si el pedido está listo para finalizar, enviar el resumen completo con el subtotal y solicitar el método de pago.
         6. Si el método de pago ya fue confirmado, dar cierre cordial al pedido.
 
-        TONO Y ESTILO DE JUAN:
+        TONO Y ESTILO DE ONE:
         - Eres un bogotano amable, con trato cercano pero profesional.
         - Utilizas expresiones naturales como: “Hola”, “Claro que sí”, “Perfecto”, “Listo”, “Con mucho gusto”.
         - Nunca usas signos de apertura (¿¡), solo los de cierre (! ?).

@@ -30,7 +30,7 @@ class Handles:
         ]
         
         print(f"🔍 Checking states for next incomplete: {order_states}")
-        print(f"📦 Order items count: {len(order_items)}")
+        print(f"📦 Order items count: {len(order_items) if order_items else 0}")
         
         for state_name in required_states:
             current_value = order_states.get(state_name, 0)
@@ -106,13 +106,14 @@ class Handles:
         
         context.append(SystemMessage(content=self.prompts.ANSWER_SYSTEM))
         user_id = state["user_id"]
+        """
         context.append(
             SystemMessage(
                 content=f"IMPORTANTE: EL user_id de este cliente es {user_id}. "
                         "Usar siempre user_id para utilizar herramientas que lo requieran"
             )
         )
-        
+        """
         if state.get("customer"):
             context.append(
                 SystemMessage(
@@ -313,7 +314,7 @@ class Handles:
         print(f"✅ Order validated - creating with {len(order_data['items'])} items, total: ${order_data['total']}")
         
         # Create enhanced prompt for order creation
-        confirmation_prompt = self.prompts.confirmation_prompt(order_data)
+        confirmation_prompt = self.prompts.confirmation_user(order_data)
         
         # Create context and get LLM response
         context = [
@@ -402,3 +403,39 @@ class Handles:
         
         print(f"💰 Updated product total price: ${product_detail.total_price}")
         return product_detail
+    
+    def _extract_tool_result(self, tool_message: ToolMessage) -> Dict[str, Any]:
+        """
+        Extract and parse tool result from ToolMessage.
+        
+        Args:
+            tool_message: ToolMessage containing tool execution result
+            
+        Returns:
+            Dictionary with parsed tool result or empty dict if parsing fails
+        """
+        try:
+            import json
+            result = json.loads(tool_message.content)
+            print(f"✅ Parsed tool result for {tool_message.tool_call_id}: {result}")
+            return result
+        except (json.JSONDecodeError, AttributeError) as e:
+            print(f"❌ Failed to parse tool result: {e}")
+            return {}
+        
+    def _find_recent_tool_messages(self, messages: List[BaseMessage], limit: int = 5) -> List[ToolMessage]:
+        """
+        Find recent ToolMessage instances in the message list.
+        
+        Args:
+            messages: List of messages to search
+            limit: Maximum number of recent messages to check
+            
+        Returns:
+            List of ToolMessage instances found
+        """
+        tool_messages = []
+        for message in reversed(messages[-limit:]):
+            if isinstance(message, ToolMessage):
+                tool_messages.append(message)
+        return tool_messages
