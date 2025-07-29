@@ -127,7 +127,6 @@ class Workflow:
         """Detect user intent from message."""
         try:
             print(f"=== DETECT_USER_INTENT_STEP START ===")
-            print(f"State received: {state}")
             print(f"State keys: {list(state.keys())}")
             
             if "messages" not in state or not state["messages"]:
@@ -135,7 +134,7 @@ class Workflow:
                 return {"divided_message": []}
             
             print(f"Messages in state: {len(state['messages'])}")
-            print(f"Last message: {state['messages'][-1]}")
+            print(f"Last message: {state['messages'][-1].content}")
             print(f"Dividing message and identifying intent: {state['messages'][-1].content}")
             
             user_id = state["user_id"]
@@ -177,18 +176,14 @@ class Workflow:
                 print(f"Error checking customer: {e}")
                 customer = None
             
-            new_message = state["messages"][-1].content if state["messages"] else ""
+            new_message = state['messages'][-1].content if state['messages'] else ""
             print(f"New message content: {new_message}")
             
-            # Get complete state for context
-            complete_state = await state_manager.load_state_for_user(user_id, new_message)
-            #complete_state = {"messages": []}
-            #print(f"Complete state: {complete_state}")
             
             context = [
                 SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
                 HumanMessage(content=self.prompts.message_splitting_user(
-                    messages=complete_state["messages"],
+                    messages=state["messages"],
                     order_states=existing_order_states,
                     customer_info=customer,
                     active_order=state.get("active_order", {})
@@ -245,36 +240,11 @@ class Workflow:
                 else:
                     existing_order_states["general"] = 1
             
-
-            # 🎯 SIMPLE APPROACH: Let smart_message_reducer handle deduplication automatically
-            historical_messages = complete_state.get("messages", [])
-            current_user_message = state["messages"][-1] if state["messages"] else None
-            
-            # The smart_message_reducer in state.py will automatically prevent duplicates
-            if current_user_message:
-                # Just combine - the reducer handles uniqueness
-                conversation_messages = historical_messages + [current_user_message]
-            else:
-                conversation_messages = historical_messages
-                
-            print(f"✅ Loaded conversation context: {len(conversation_messages)} messages (smart reducer will handle deduplication)")
-            
-            print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-            print(f"Historical messages: {historical_messages}")
-            print(f"Current user message: {current_user_message}")
-            
-            # Si el mensaje actual del usuario no está ya en el historial, añadirlo
-            #all_messages = historical_messages[:]  # Copia del historial
-            #if current_user_message and (not historical_messages or 
-            #    historical_messages[-1].content != current_user_message.content):
-            #     all_messages.append(current_user_message)
-            #     print(f"✅ Added current user message to conversation history")
-            
             result = {
                 "divided_message": divided,
                 "order_states": existing_order_states,
                 "customer": customer,
-                "messages": historical_messages,  # 📝 Mensajes históricos + mensaje actual
+                "messages": [],
                 "active_order": state.get("active_order", {}),  # Preserve active_order
                 # Individual state fields for ChatState compatibility
                 "saludo": existing_order_states.get("saludo", 0),
@@ -338,13 +308,10 @@ class Workflow:
             "order_items": []
         })
         
-        # Create enhanced prompt with user context
-        enhanced_user_prompt = self.prompts.enhance_user_prompt(user_id, active_order.get("order_items", []), section)
-        
         # Create context with enhanced instructions
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=enhanced_user_prompt)
+            HumanMessage(content=self.prompts.tools_execution_user(user_id, active_order.get("order_items", []), section))
         ]
         
         # Handle different intent types
@@ -678,6 +645,7 @@ class Workflow:
         
         # Get active order information
         active_order = state.get("active_order", {"order_items": [], "order_total": 0.0})
+        print(f"Active order: {active_order}")
         order_items = active_order.get("order_items", [])
         order_total = active_order.get("order_total", 0.0)
         

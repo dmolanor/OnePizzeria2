@@ -157,21 +157,16 @@ class ChatStateManager:
             # Get conversation history as LangChain messages
             historical_messages = context.get_messages_for_llm()
             
-            # Add the new message
-            #new_human_message = HumanMessage(content=new_message)
-            #all_messages = historical_messages + [new_human_message]
-            all_messages = historical_messages
-            
             # Determine current step and flags
             needs_customer_info = not customer or not customer.get("last_name")
             ready_to_order = bool(customer and customer.get("last_name"))
             
             # Determine current step based on context
-            current_step = self._determine_current_step(context, new_message, needs_customer_info)
+            current_step = self._determine_current_step(context, new_message.content, needs_customer_info)
             
             state = ChatState(
                 user_id=user_id,
-                messages=all_messages,
+                messages=historical_messages,
                 customer=customer,
                 current_step=current_step,
                 active_order=active_order,
@@ -179,7 +174,7 @@ class ChatStateManager:
                 ready_to_order=ready_to_order
             )
             
-            logger.info(f"Loaded state for {user_id}: {len(all_messages)} messages, step: {current_step}")
+            logger.info(f"Loaded state for {user_id}: {len(historical_messages)} messages, step: {current_step}")
             return state
             
         except Exception as e:

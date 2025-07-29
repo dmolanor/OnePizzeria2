@@ -108,73 +108,6 @@ class CustomerServicePrompts:
             {order_context if order_context else "No hay productos en el pedido"}
             
             """
-    
-    def enhance_user_prompt(self, user_id, order_items, section):
-        return f"""
-        INFORMACIÓN DEL USUARIO:
-        - User ID: {user_id}
-        - Pedido actual: {order_items}
-        
-        SECCIÓN A PROCESAR:
-        - Intent: {section["intent"]}
-        - Action: {section["action"]}
-        
-        INSTRUCCIONES ESPECÍFICAS:
-        
-        Si es "registro_datos_personales":
-        - Extrae nombre completo y teléfono del action
-        - Usa create_client con formato: {{"id": "{user_id}", "nombre_completo": "nombre", "telefono": "numero"}}
-        
-        Si es "registro_direccion":
-        - Extrae la dirección del action  
-        - Usa update_client con formato: {{"id": "{user_id}", "direccion": "direccion_completa"}}
-        
-        Si es "crear_pedido":
-        - SIEMPRE usa create_order para crear un pedido en pedidos_activos
-        - Usa create_order con formato: {{"cliente_id": "{user_id}", "items": [], "total": 0.0, "direccion_entrega": "direccion_del_cliente"}}
-        - CRÍTICO: Esto debe ejecutarse ANTES de agregar productos
-        
-        Si es "seleccion_productos":
-        - PRIMERO: Verifica si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
-        - Si NO existe pedido activo: USA create_order PRIMERO
-        - LUEGO: Si menciona pizza: usa get_pizza_by_name con name="nombre_pizza_exacto"
-        - LUEGO: Si menciona bebida: usa get_beverage_by_name con name="nombre_bebida_exacto"
-        - DESPUÉS de obtener productos: USA update_order para agregar al pedido activo
-        
-        Si es "confirmacion":
-        - Si confirma pedido y hay productos: usa update_order para actualizar dirección y método de pago
-        - IMPORTANTE: Solo actualizar pedido cuando el usuario CONFIRME explícitamente
-        
-        Si es "finalizacion":
-        - Si el usuario proporciona método de pago: usa finish_order con {{"cliente_id": "{user_id}"}}
-        - Esto moverá el pedido de activos a finalizados
-        
-        FLUJO CRÍTICO PARA PRODUCTOS:
-        1. Verificar pedido activo (get_active_order_by_client)
-        2. Si no existe → Crear pedido (create_order)
-        3. Buscar producto (get_pizza_by_name/get_beverage_by_name)
-        4. Actualizar pedido con producto (update_order)
-        
-        RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
-        """
-    
-    def confirmation_prompt(self, order_data):
-        return f"""
-        CONFIRMACIÓN DE PEDIDO:
-        
-        El usuario ha confirmado su pedido. Procede a crear el pedido en la base de datos.
-        
-        DATOS DEL PEDIDO:  
-        - Cliente ID: {order_data['cliente_id']}
-        - Productos: {len(order_data['items'])} items
-        - Total: ${order_data['total']}
-        
-        USA LA HERRAMIENTA: create_order con estos argumentos exactos:
-        - cliente_id: "{order_data['cliente_id']}"
-        - items: {order_data['items']}
-        - total: {order_data['total']}
-        """
-    
     TOOLS_EXECUTION_SYSTEM = """
         Eres un agente especializado en ejecutar herramientas para el proceso de pedidos de pizzería.
 
@@ -240,6 +173,38 @@ class CustomerServicePrompts:
         - Solo confirma pedidos cuando el usuario diga "confirmo", "está bien", "correcto", etc.
         - Usa argumentos específicos, nunca argumentos vacíos {{}}
         """
+        
+    def tools_execution_user(self, user_id, order_items, section):
+        return f"""
+        INFORMACIÓN DEL USUARIO:
+        - User ID: {user_id}
+        - Pedido actual: {order_items}
+        
+        SECCIÓN A PROCESAR:
+        - Intent: {section["intent"]}
+        - Action: {section["action"]}
+        
+        RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
+        """
+    
+    def confirmation_prompt(self, order_data):
+        return f"""
+        CONFIRMACIÓN DE PEDIDO:
+        
+        El usuario ha confirmado su pedido. Procede a crear el pedido en la base de datos.
+        
+        DATOS DEL PEDIDO:  
+        - Cliente ID: {order_data['cliente_id']}
+        - Productos: {len(order_data['items'])} items
+        - Total: ${order_data['total']}
+        
+        USA LA HERRAMIENTA: create_order con estos argumentos exactos:
+        - cliente_id: "{order_data['cliente_id']}"
+        - items: {order_data['items']}
+        - total: {order_data['total']}
+        """
+    
+    
         
     def product_selection_prompt(self, section, user_id):
         return f"""
@@ -311,7 +276,8 @@ class CustomerServicePrompts:
         - Hazlo como si estuvieras en un chat con el cliente real.
         - Sé amable, ágil y resolutivo.
         - Si el cliente pregunta por algo que no está claro, busca en el historial reciente y responde según lo que ya se sabe.
-
+        - Nunca repitas mensajes anteriores, siempre responde con algo nuevo.
+        
         Tu misión es ayudar, guiar y completar los pedidos de forma eficiente y cálida.
 
         EJEMPLO DE RESPUESTA FINAL:

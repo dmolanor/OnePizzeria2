@@ -6,6 +6,9 @@ from langchain_core.tools import tool
 from langgraph.graph.message import add_messages
 from langgraph.graph import StateGraph, END, START
 from langgraph.prebuilt import ToolNode
+from ..src.checkpointer import state_manager
+
+from ..src.prompts import CustomerServicePrompts
 
 import json
 import re
@@ -58,51 +61,29 @@ model = ChatOpenAI(
 
 def agente_divisor(state: ChatState) -> Dict[str, Any]:
     print(f"Dividing message and identifying intent: {state["messages"]}")
-        
+    
+    existing_order_states = {
+                "saludo": 0,
+                "registro_datos_personales": 0,
+                "registro_direccion": 0,
+                "consulta_menu": 0,
+                "crear_pedido": 0,
+                "seleccion_productos": 0,
+                "confirmacion": 0,
+                "finalizacion": 0,
+                "general": 0
+            }
+    user_id = state["user_id"]
+    new_message = state["messages"][-1].content if state["messages"] else ""
+    complete_state = state_manager.load_state_for_user(user_id, new_message)
     messages = [
-        SystemMessage(content="""Eres un divisor de mensajes por intención y semántica. 
-                        Tu tarea es dividir un mensaje del usuario en una lista de mensajes, cada uno perteneciente a una intención y acción diferente, y retornar una lista de diccionarios.
-                        """),
-        HumanMessage(content="Mensaje del usuario:" +  state["messages"][-1].content + """
-
-            Divide el mensaje en una lista de mensajes, cada uno perteneciente a una intención y acción diferente.
-            Si el mensaje pertenece a más de una intención y acción, divídelo en tantos mensajes como sea necesario.
-            Cada fragmento puede pertenecer a una de las siguientes categorías:
-            - saludo
-            - registro_datos_personales
-            - registro_direccion
-            - consulta_menu
-            - seleccion_productos
-            - confirmacion
-            - finalizacion
-            - general (si el mensaje no pertenece a ninguna de las categorías anteriores)
-
-            Devuelve la lista de mensajes con la categoría de intensión a la que pertenece y el fragmento del mensaje correspondiente. 
-            Este fragmento debe resumir lo que desea el usuario, sin perder información relevante. Si un mensaje recibe múltiples fragmentos con la misma intención, separalos en diferentes mensajes y diccionarios.
-            Ejemplo:
-            - mensaje: "Hola, quiero pedir una pizza de pepperoni para la direccion Calle 10 #20-30."
-                return: [
-                    {"intent": "saludo", "action": "saludar"},
-                    {"intent": "registro_direccion", "action": "Calle 10 #20-30"},
-                    {"intent": "seleccion_productos", "action": "pedido_pizza_pepperoni"},
-                ]
-            - mensaje: "Necesito actualizar mi número de teléfono."
-                return: [
-                    {"intent": "registro_datos_personales", "action": "actualizar_telefono"},
-                ]
-            - mensaje: "¿Qué ingredientes tiene la pizza hawaiana?"
-                return: [
-                    {"intent": "consulta_menu", "action": "ingredientes_pizza_hawaiana"},
-                ]
-            - mensaje: "Quiero una pizza de pepperoni y una Coca Cola cero."
-                return: [
-                    {"intent": "seleccion_productos", "action": "pedido_pizza_pepperoni"},
-                    {"intent": "seleccion_productos", "action": "pedido_coca_cola_zero"},
-                ]
-            
-            Para mayor contexto, dada una situación donde un mensaje por si solo no tenga significado en las categorías, el historial de los últimos 3 mensajes chat es: {" ".join(msg.content for msg in message[-4:-1])}
-            """)
-    ]
+                SystemMessage(content=CustomerServicePrompts.MESSAGE_SPLITTING_SYSTEM),
+                HumanMessage(content=CustomerServicePrompts.message_splitting_user(
+                    messages=complete_state["messages"],
+                    order_states=existing_order_states,
+                    active_order=state.get("active_order", {})
+                ))
+            ]
     
     try:
         response = model.invoke(messages)
@@ -251,8 +232,8 @@ def _build_conversation_context(state: ChatState) -> list:
     user_id = state["user_id"]
     messages.append(SystemMessage(content=f"IMPORTANTE: EL user_id de este cliente es {user_id}. Usar siempre user_id para utilizar herramientas que lo requieran"))
     
-    #if state["costumer"]:
-    #    messages.append(SystemMessage(content=f"Esta es la información actual del cliente: {state['costumer']}"))
+    #if state["customer"]:
+    #    messages.append(SystemMessage(content=f"Esta es la información actual del cliente: {state['customer']}"))
     
     messages.extend(state["messages"])
     print(messages)
