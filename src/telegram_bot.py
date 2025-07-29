@@ -39,8 +39,8 @@ class TelegramBot:
         self._setup_shutdown_handlers()
         
         # Message grouping mechanism - prevents multiple responses for rapid messages
-        self.pending_tasks: Dict[str, asyncio.Task] = {}  # user_id -> processing task
-        self.pending_messages: Dict[str, List[str]] = {}  # user_id -> list of messages
+        self.pending_tasks: Dict[str, asyncio.Task] = {}  # cliente_id -> processing task
+        self.pending_messages: Dict[str, List[str]] = {}  # cliente_id -> list of messages
         self.message_delay = 3.0  # seconds to wait for additional messages
 
     def _setup_handlers(self) -> None:
@@ -115,26 +115,26 @@ class TelegramBot:
             # Get the user's message and info
             message_text = update.message.text
             user = update.effective_user
-            user_id = str(user.id)  # Convert to string as workflow expects string
+            cliente_id = str(user.id)  # Convert to string as workflow expects string
             user_name = user.first_name
             
-            logger.info(f"📥 Received message from {user_name} ({user_id}): {message_text}")
+            logger.info(f"📥 Received message from {user_name} ({cliente_id}): {message_text}")
             
             # Cancel any existing processing task for this user
-            if user_id in self.pending_tasks:
-                self.pending_tasks[user_id].cancel()
-                logger.info(f"⏹️ Cancelled previous processing task for user {user_id}")
+            if cliente_id in self.pending_tasks:
+                self.pending_tasks[cliente_id].cancel()
+                logger.info(f"⏹️ Cancelled previous processing task for user {cliente_id}")
             
             # Add message to pending messages for this user
-            if user_id not in self.pending_messages:
-                self.pending_messages[user_id] = []
-            self.pending_messages[user_id].append(message_text)
+            if cliente_id not in self.pending_messages:
+                self.pending_messages[cliente_id] = []
+            self.pending_messages[cliente_id].append(message_text)
             
-            logger.info(f"📋 Total pending messages for {user_name}: {len(self.pending_messages[user_id])}")
+            logger.info(f"📋 Total pending messages for {user_name}: {len(self.pending_messages[cliente_id])}")
             
             # Create new delayed processing task
-            self.pending_tasks[user_id] = asyncio.create_task(
-                self._delayed_message_processing(update, user_id, user_name)
+            self.pending_tasks[cliente_id] = asyncio.create_task(
+                self._delayed_message_processing(update, cliente_id, user_name)
             )
             
         except Exception as e:
@@ -146,13 +146,13 @@ class TelegramBot:
                 "Lo siento, hubo un error procesando tu mensaje. Por favor, intenta de nuevo."
             )
     
-    async def _delayed_message_processing(self, update: Update, user_id: str, user_name: str) -> None:
+    async def _delayed_message_processing(self, update: Update, cliente_id: str, user_name: str) -> None:
         """
         Process messages after a delay, allowing for message grouping.
         
         Args:
             update: The Telegram update object
-            user_id: User identifier
+            cliente_id: User identifier
             user_name: User's first name
         """
         try:
@@ -160,13 +160,13 @@ class TelegramBot:
             await asyncio.sleep(self.message_delay)
             
             # Get all pending messages for this user
-            messages = self.pending_messages.get(user_id, [])
+            messages = self.pending_messages.get(cliente_id, [])
             if not messages:
-                logger.warning(f"No pending messages found for user {user_id}")
+                logger.warning(f"No pending messages found for user {cliente_id}")
                 return
             
             # Clear pending messages for this user
-            self.pending_messages[user_id] = []
+            self.pending_messages[cliente_id] = []
             
             # Combine multiple messages into one if needed
             if len(messages) == 1:
@@ -178,10 +178,9 @@ class TelegramBot:
                 logger.info(f"📝 Combined message: {combined_message}")
             
             # Process combined message through workflow
-            initial_state = await state_manager.load_state_for_user(user_id, HumanMessage(combined_message))
-            print(f"Initial state messages: {initial_state}")
+            initial_state = await state_manager.load_state_for_user(cliente_id, HumanMessage(combined_message))
             initial_state["messages"] += [HumanMessage(combined_message)]
-            print(initial_state)
+            print(f"initial state messages: {initial_state}")
             logger.info(f"Initial state created: {initial_state}")
             
             logger.info("Starting workflow execution...")
@@ -203,11 +202,11 @@ class TelegramBot:
                 logger.warning("No messages found in response state")
             
             # Clean up pending task
-            if user_id in self.pending_tasks:
-                del self.pending_tasks[user_id]
+            if cliente_id in self.pending_tasks:
+                del self.pending_tasks[cliente_id]
                 
         except asyncio.CancelledError:
-            logger.info(f"⏹️ Message processing cancelled for user {user_id}")
+            logger.info(f"⏹️ Message processing cancelled for user {cliente_id}")
             # Don't re-raise CancelledError as it's expected behavior
         except Exception as e:
             import traceback
@@ -223,10 +222,10 @@ class TelegramBot:
                 logger.error(f"Failed to send error message: {reply_error}")
             
             # Clean up on error
-            if user_id in self.pending_tasks:
-                del self.pending_tasks[user_id]
-            if user_id in self.pending_messages:
-                self.pending_messages[user_id] = []
+            if cliente_id in self.pending_tasks:
+                del self.pending_tasks[cliente_id]
+            if cliente_id in self.pending_messages:
+                self.pending_messages[cliente_id] = []
 
     async def _handle_tool_response(self, update: Update, tool_call: dict) -> None:
         """Handle different types of tool responses."""
@@ -363,16 +362,16 @@ class TelegramBot:
         """
         try:
             user = update.effective_user
-            user_id = str(user.id)
+            cliente_id = str(user.id)
             user_name = user.first_name
             
-            logger.info(f"🧹 User {user_name} ({user_id}) requested cache clear")
+            logger.info(f"🧹 User {user_name} ({cliente_id}) requested cache clear")
             
             # Get cache info before clearing
-            cache_info = await memory.get_user_cache_info(user_id)
+            cache_info = await memory.get_user_cache_info(cliente_id)
             
             # Clear the cache
-            success = await memory.clear_user_cache(user_id)
+            success = await memory.clear_user_cache(cliente_id)
             
             if success:
                 if cache_info.get("message_count", 0) > 0:
@@ -415,9 +414,9 @@ class TelegramBot:
         """
         try:
             user = update.effective_user
-            user_id = str(user.id)
+            cliente_id = str(user.id)
             
-            cache_info = await memory.get_user_cache_info(user_id)
+            cache_info = await memory.get_user_cache_info(cliente_id)
             
             if cache_info.get("error"):
                 await update.message.reply_text(
@@ -457,16 +456,16 @@ class TelegramBot:
         🔧 ADMIN CACHE MANAGEMENT COMMAND
         
         For admins to manage cache globally.
-        Format: /admin_clear [user_id|all]
+        Format: /admin_clear [cliente_id|all]
         """
         try:
             user = update.effective_user
-            user_id = str(user.id)
+            cliente_id = str(user.id)
             
             # Check if user is admin - Configure your admin IDs here
             ADMIN_IDS = ["123456789"]  # 🔧 TODO: Replace with actual admin Telegram IDs
             
-            if user_id not in ADMIN_IDS:
+            if cliente_id not in ADMIN_IDS:
                 await update.message.reply_text("❌ Solo administradores pueden usar este comando.")
                 return
             
@@ -474,7 +473,7 @@ class TelegramBot:
             args = context.args
             if not args:
                 await update.message.reply_text(
-                    "📖 **Uso:** `/admin_clear [user_id|all]`\n\n"
+                    "📖 **Uso:** `/admin_clear [cliente_id|all]`\n\n"
                     "**Ejemplos:**\n"
                     "• `/admin_clear 123456789` - Limpiar cache de usuario específico\n"
                     "• `/admin_clear all` - Limpiar cache de todos los usuarios\n\n"
@@ -496,17 +495,17 @@ class TelegramBot:
                 )
             else:
                 # Clear specific user cache
-                target_user_id = target
-                success = await memory.clear_user_cache(target_user_id)
+                target_cliente_id = target
+                success = await memory.clear_user_cache(target_cliente_id)
                 
                 if success:
                     await update.message.reply_text(
-                        f"✅ **Cache limpiado para usuario:** `{target_user_id}`",
+                        f"✅ **Cache limpiado para usuario:** `{target_cliente_id}`",
                         parse_mode='Markdown'
                     )
                 else:
                     await update.message.reply_text(
-                        f"❌ **Error limpiando cache para usuario:** `{target_user_id}`",
+                        f"❌ **Error limpiando cache para usuario:** `{target_cliente_id}`",
                         parse_mode='Markdown'
                     )
                     
@@ -553,10 +552,10 @@ class TelegramBot:
         # Cancel all pending message processing tasks
         if self.pending_tasks:
             logger.info(f"⏹️ Cancelling {len(self.pending_tasks)} pending message tasks...")
-            for user_id, task in self.pending_tasks.items():
+            for cliente_id, task in self.pending_tasks.items():
                 if not task.cancelled():
                     task.cancel()
-                    logger.info(f"   Cancelled task for user {user_id}")
+                    logger.info(f"   Cancelled task for user {cliente_id}")
             
             # Wait a brief moment for tasks to clean up
             await asyncio.sleep(0.1)
@@ -582,11 +581,11 @@ class TelegramBot:
             "total_pending_messages": sum(len(msgs) for msgs in self.pending_messages.values()),
             "message_delay_seconds": self.message_delay,
             "user_details": {
-                user_id: {
+                cliente_id: {
                     "pending_message_count": len(messages),
-                    "has_active_task": user_id in self.pending_tasks,
-                    "task_cancelled": user_id in self.pending_tasks and self.pending_tasks[user_id].cancelled()
+                    "has_active_task": cliente_id in self.pending_tasks,
+                    "task_cancelled": cliente_id in self.pending_tasks and self.pending_tasks[cliente_id].cancelled()
                 }
-                for user_id, messages in self.pending_messages.items() if messages
+                for cliente_id, messages in self.pending_messages.items() if messages
             }
         }

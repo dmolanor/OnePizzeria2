@@ -102,8 +102,8 @@ class Workflow:
             print(f"Last message: {state['messages'][-1].content}")
             print(f"Dividing message and identifying intent: {state['messages'][-1].content}")
             
-            user_id = state["user_id"]
-            print(f"User ID: {user_id}")
+            cliente_id = state["cliente_id"]
+            print(f"User ID: {cliente_id}")
             
             # Get existing order states from previous state or initialize
             existing_order_states = state.get("order_states", {
@@ -121,7 +121,7 @@ class Workflow:
             
             # Check if user exists in database and update states accordingly
             try:
-                customer_result = supabase.table("clientes").select("*").eq("id", user_id).execute()
+                customer_result = supabase.table("clientes").select("*").eq("id", cliente_id).execute()
                 if customer_result.data:
                     customer = customer_result.data[0]
                     print(f"Customer found: {customer}")
@@ -251,7 +251,7 @@ class Workflow:
     async def retrieve_data_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Retrieve relevant data based on user intent."""
         from datetime import datetime
-        
+        print("=== RETRIEVE DATA STEP START ===")
         print(f"Retrieving data based on divided messages... {state['divided_message']}")
         
         if not state["divided_message"]:
@@ -260,15 +260,14 @@ class Workflow:
         
         # Get current section to process
         section = state["divided_message"].pop()
-        user_id = state.get("user_id", "")
+        cliente_id = state.get("cliente_id", "")
         
         print(f"Processing section: {section}")
-        print(f"User ID: {user_id}")
-        print(state)
+        print(f"User ID: {cliente_id}")
         
         # Get existing order from state or create new one
         active_order = state.get("active_order", {
-            "order_id": f"order_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "order_id": f"order_{cliente_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "order_date": datetime.now().isoformat(),
             "order_total": 0.0,
             "order_items": []
@@ -281,36 +280,53 @@ class Workflow:
         # Create context with enhanced instructions
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tools_execution_user(user_id, order_items, section))
+            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("order_items", []), section))
         ]
         
         # Handle different intent types
         if section["intent"] == "confirmacion":
             print("🔄 Detected confirmation intent - handling order confirmation")
             confirmation_result = await self.handles._handle_order_confirmation(state, section)
-            updated_state = {"messages": list(state["messages"]) + confirmation_result["messages"]}
+            updated_state = {"messages": confirmation_result["messages"]}
         elif section["intent"] == "crear_pedido":
-            print("🔄 Detected crear_pedido intent - ensuring order exists in database")
-            response = await self.llm.bind_tools(ORDER_TOOLS).ainvoke(context)
-            updated_state = {"messages": list(state["messages"]) + [response]}
             
-            # Log tool usage for order creation
-            if hasattr(response, "tool_calls") and response.tool_calls:
-                print(f"🔧 CREATING ORDER: {[tc['name'] for tc in response.tool_calls]}")
-                for tool_call in response.tool_calls:
-                    print(f"Order Creation Tool: {tool_call['name']}, Args: {tool_call['args']}")
+            if state["customer"]:
+                print("🔄 Detected crear_pedido intent - ensuring order exists in database")
+                response = await self.llm.bind_tools(ORDER_TOOLS).ainvoke(context)
+                updated_state = {"messages": [response]}
+            
+                # Log tool usage for order creation
+                if hasattr(response, "tool_calls") and response.tool_calls:
+                    print(f"🔧 CREATING ORDER: {[tc['name'] for tc in response.tool_calls]}")
+                    for tool_call in response.tool_calls:
+                        print(f"Order Creation Tool: {tool_call['name']}, Args: {tool_call['args']}")
+            else:
+                section = {"intent": "crear_cliente", "action": "Crear nuevo cliente con solo user_id"}
+                context = [
+                    SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
+                    HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("order_items", []), section))
+                ]
+                print("Detected crear_cliente intent - creating new client in database")
+                response = await self.llm.bind_tools(CUSTOMER_TOOLS).ainvoke(context)
+                updated_state = {"messages": [response]}
+            
+                # Log tool usage for order creation
+                if hasattr(response, "tool_calls") and response.tool_calls:
+                    print(f"🔧 CREATING CLIENT: {[tc['name'] for tc in response.tool_calls]}")
+                    for tool_call in response.tool_calls:
+                        print(f"Client Creation Tool: {tool_call['name']}, Args: {tool_call['args']}")
         elif section["intent"] == "seleccion_productos":
             print("🔄 Detected seleccion_productos intent - searching for products and managing order")
             
             # Enhanced prompt specifically for product selection
             product_selection_prompt = f"""
-            SELECCIÓN DE PRODUCTOS - USUARIO: {user_id}
+            SELECCIÓN DE PRODUCTOS - USUARIO: {cliente_id}
             
             ACCIÓN DEL USUARIO: {section["action"]}
             
             FLUJO OBLIGATORIO:
-            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
-            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{user_id}", "items": [], "total": 0.0}})
+            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{cliente_id}"}})
+            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{cliente_id}", "items": [], "total": 0.0}})
             3. LUEGO: Buscar el producto mencionado:
                - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
                - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
@@ -327,7 +343,7 @@ class Workflow:
             ]
             
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(product_context)
-            updated_state = {"messages": list(state["messages"]) + [response]}
+            updated_state = {"messages": [response]}
             
             # Log tool usage for product selection
             if hasattr(response, "tool_calls") and response.tool_calls:
@@ -379,11 +395,11 @@ class Workflow:
         print(f"=== PROCESSING TOOL RESULTS ===")
         
         messages = state.get("messages", [])
-        user_id = state.get("user_id", "unknown")
+        cliente_id = state.get("cliente_id", "unknown")
         
         # Get existing active_order or create new one with proper structure
-        active_order = state.get("active_order", {
-            "order_id": f"order_{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        active_order_data = state.get("active_order", {
+            "order_id": f"order_{cliente_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "order_date": datetime.now().isoformat(),
             "order_total": 0.0,
             "order_items": []
@@ -528,7 +544,7 @@ class Workflow:
                                     get_active_order_by_client, update_order)
 
                                 # Get active order from database
-                                db_order = get_active_order_by_client(user_id)
+                                db_order = get_active_order_by_client(cliente_id)
                                 
                                 if "error" not in db_order:
                                     # Update existing order in database
@@ -557,7 +573,7 @@ class Workflow:
                                     # Try to create an order first
                                     from src.tools import create_order
                                     create_result = create_order(
-                                        cliente_id=user_id,
+                                        cliente_id=cliente_id,
                                         items=[product_dict],
                                         total=product_detail.total_price,
                                         direccion_entrega=None
@@ -598,7 +614,7 @@ class Workflow:
     
     async def send_response_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Generate and format response to user."""
-        user_id = state["user_id"]
+        cliente_id = state["cliente_id"]
         new_message = state["messages"][-1] if state["messages"] else None
         
         if new_message:
@@ -746,18 +762,18 @@ class Workflow:
     async def save_memory_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """📤 FINAL NODE: Save complete conversation to memory database."""
         try:
-            user_id = state["user_id"]
+            cliente_id = state["cliente_id"]
             messages = state.get("messages", [])
             
             print(f"💾 SAVING COMPLETE CONVERSATION TO MEMORY")
-            print(f"   - User ID: {user_id}")
+            print(f"   - User ID: {cliente_id}")
             print(f"   - Total messages to save: {len(messages)}")
             
             # 🔍 IDENTIFICAR MENSAJES NUEVOS QUE NO ESTÁN EN BD
             from src.memory import memory
 
             # Obtener conversación actual de la BD para comparar
-            existing_context = await memory.get_conversation(user_id)
+            existing_context = await memory.get_conversation(cliente_id)
             existing_messages = existing_context.recent_messages
             existing_count = len(existing_messages)
             
@@ -786,7 +802,7 @@ class Workflow:
                 # Guardar cada mensaje nuevo individualmente
                 for i, message in enumerate(new_messages_to_save):
                     try:
-                        await memory.add_message(user_id, message)
+                        await memory.add_message(cliente_id, message)
                         role = "👤 Usuario" if hasattr(message, '__class__') and 'Human' in str(message.__class__) else "🤖 Agente"
                         content_preview = message.content[:50] + "..." if len(message.content) > 50 else message.content
                         print(f"   ✅ Guardado {i+1}/{len(new_messages_to_save)}: {role} - {content_preview}")
@@ -800,7 +816,7 @@ class Workflow:
                 # Update customer context if we have relevant info
                 if state.get("customer") and state["customer"].get("nombre_completo"):
                     await memory.update_customer_context(
-                        user_id, 
+                        cliente_id, 
                         "customer_name", 
                         state["customer"]["nombre_completo"]
                     )
@@ -809,7 +825,7 @@ class Workflow:
                 # Update order context if we have an active order
                 if state.get("active_order") and state["active_order"].get("order_items"):
                     await memory.update_customer_context(
-                        user_id,
+                        cliente_id,
                         "current_order",
                         state["active_order"]
                     )
@@ -817,7 +833,7 @@ class Workflow:
             except Exception as context_error:
                 print(f"   ⚠️ Error actualizando contexto: {context_error}")
             
-            print(f"✅ Conversación completa guardada para usuario {user_id}")
+            print(f"✅ Conversación completa guardada para usuario {cliente_id}")
             
             # Return the state unchanged (this is the final node)
             return state

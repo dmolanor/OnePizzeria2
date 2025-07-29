@@ -235,7 +235,7 @@ class MemoryManager:
             "cache_hit": thread_id in self._cache
         }
 
-    async def clear_user_cache(self, user_id: str) -> bool:
+    async def clear_user_cache(self, cliente_id: str) -> bool:
         """
         🧹 CLEAR ALL CACHED DATA FOR A SPECIFIC USER
         
@@ -249,37 +249,37 @@ class MemoryManager:
         Use this when a user wants to start completely fresh.
         """
         try:
-            logger.info(f"🧹 CLEARING ALL CACHE FOR USER: {user_id}")
+            logger.info(f"🧹 CLEARING ALL CACHE FOR USER: {cliente_id}")
             
             # 1. Clear from conversations table
-            result1 = supabase.table("conversations").delete().eq("thread_id", user_id).execute()
+            result1 = supabase.table("conversations").delete().eq("thread_id", cliente_id).execute()
             logger.info(f"   ✅ Conversations cleared: {len(result1.data) if result1.data else 0} records")
             
             # 2. Clear from any other related tables (adjust table names as needed)
             try:
                 # Clear customer data cache if separate table exists
-                result2 = supabase.table("customer_cache").delete().eq("user_id", user_id).execute()
+                result2 = supabase.table("customer_cache").delete().eq("cliente_id", cliente_id).execute()
                 logger.info(f"   ✅ Customer cache cleared: {len(result2.data) if result2.data else 0} records")
             except Exception as e:
                 logger.info(f"   ℹ️  No customer_cache table or already clean: {e}")
             
             try:
                 # Clear order states cache if separate table exists  
-                result3 = supabase.table("order_states_cache").delete().eq("user_id", user_id).execute()
+                result3 = supabase.table("order_states_cache").delete().eq("cliente_id", cliente_id).execute()
                 logger.info(f"   ✅ Order states cache cleared: {len(result3.data) if result3.data else 0} records")
             except Exception as e:
                 logger.info(f"   ℹ️  No order_states_cache table or already clean: {e}")
             
             # 3. Clear from memory cache
-            if user_id in self._cache:
-                del self._cache[user_id]
+            if cliente_id in self._cache:
+                del self._cache[cliente_id]
                 logger.info(f"   ✅ In-memory cache cleared for user")
             
-            logger.info(f"🎉 CACHE COMPLETELY CLEARED for user {user_id}")
+            logger.info(f"🎉 CACHE COMPLETELY CLEARED for user {cliente_id}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error clearing cache for user {user_id}: {e}")
+            logger.error(f"❌ Error clearing cache for user {cliente_id}: {e}")
             return False
     
     async def clear_all_cache(self) -> dict:
@@ -317,7 +317,7 @@ class MemoryManager:
             logger.error(f"❌ Error clearing all cache: {e}")
             return {"error": str(e)}
     
-    async def get_user_cache_info(self, user_id: str) -> dict:
+    async def get_user_cache_info(self, cliente_id: str) -> dict:
         """
         📊 GET INFORMATION ABOUT CACHED DATA FOR A USER
         
@@ -325,8 +325,8 @@ class MemoryManager:
         """
         try:
             info = {
-                "user_id": user_id,
-                "conversation_exists": user_id in self._cache,
+                "cliente_id": cliente_id,
+                "conversation_exists": cliente_id in self._cache,
                 "database_records": 0,
                 "message_count": 0,
                 "last_activity": None,
@@ -334,7 +334,7 @@ class MemoryManager:
             }
             
             # Check database
-            result = supabase.table("conversations").select("*").eq("thread_id", user_id).execute()
+            result = supabase.table("conversations").select("*").eq("thread_id", cliente_id).execute()
             if result.data:
                 info["database_records"] = len(result.data)
                 if result.data[0].get("data"):
@@ -348,15 +348,15 @@ class MemoryManager:
                     info["cache_size_estimate"] = f"{size_bytes / 1024:.1f} KB"
             
             # Check memory
-            if user_id in self._cache:
-                context = self._cache[user_id]
+            if cliente_id in self._cache:
+                context = self._cache[cliente_id]
                 info["memory_message_count"] = len(context.recent_messages)
                 info["memory_last_activity"] = context.last_activity.isoformat()
             
             return info
             
         except Exception as e:
-            logger.error(f"Error getting cache info for user {user_id}: {e}")
+            logger.error(f"Error getting cache info for user {cliente_id}: {e}")
             return {"error": str(e)}
 
 

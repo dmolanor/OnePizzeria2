@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 import os
 
 from langchain_core.tools import tool
@@ -46,13 +47,13 @@ def get_active_order_by_client(cliente_id: str) -> dict:
     try:
         result = supabase.table("pedidos_activos").select("*").eq("cliente_id", cliente_id).execute()
         if result.data:
-            return result.data[0]  # Retorna el primer pedido activo encontrado
+            return {"success": "Se ha encontrado un pedido activo", "data": result.data[0]}  # Retorna el primer pedido activo encontrado
         else:
-            return {"error": f"No hay pedido activo para el cliente {cliente_id}"}
+            return {"fail": f"No hay pedido activo para el cliente {cliente_id}","data": {}}
     except Exception as e:
         return {"error": f"Error al buscar pedido activo: {str(e)}"}
 @tool
-def create_order(cliente_id: str, items: list = None, total: float = 0.0, direccion_entrega: str = None, estado: str = "PREPARANDO") -> dict:
+def create_order(cliente_id: str, items: list = None, total: float = 0.0, direccion_entrega: str = NULL, estado: str = "PREPARANDO") -> dict:
     """
     Crea un nuevo pedido activo.
     
@@ -191,12 +192,12 @@ def finish_order(cliente_id: str) -> dict:
 
 
 @tool
-def get_client_by_id(user_id: str) -> dict:
+def get_client_by_id(cliente_id: str) -> dict:
     """
     Retorna la información de un cliente a partir de su ID de Telegram.
     
     Args:
-        user_id: El ID del usuario de Telegram (como string)
+        cliente_id: El ID del usuario de Telegram (como string)
         
     Returns:
         dict: Los datos del cliente si existe
@@ -205,11 +206,11 @@ def get_client_by_id(user_id: str) -> dict:
         get_client_by_id("7315133184")
     """
     try:
-        result = supabase.table("clientes").select("*").eq("id", user_id).execute()
+        result = supabase.table("clientes").select("*").eq("id", cliente_id).execute()
         if result.data:
             return result.data[0]
         else:
-            return {"error": f"Cliente con ID {user_id} no encontrado"}
+            return {"error": f"Cliente con ID {cliente_id} no encontrado"}
     except Exception as e:
         return {"error": f"Error al buscar cliente: {str(e)}"}
 

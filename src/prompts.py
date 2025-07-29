@@ -119,14 +119,18 @@ class CustomerServicePrompts:
         
         MAPEO DE INTENTS A HERRAMIENTAS:
         
+        Si es "crear_cliente":
+        - Usa create_client
+        - Argumentos: id="cliente_id"
+        
         Si es "registro_datos_personales":
         - Extraer nombre, apellido y teléfono del action
-        - Usa create_client 
-        - Argumentos: id="user_id", nombre="nombre", apellido="apellido", telefono="numero"
+        - Usa update_client 
+        - Argumentos: id="cliente_id", nombre="nombre", apellido="apellido", telefono="numero"
         
         Si es "registro_direccion":
         - Extraer dirección y usar "update_client"
-        - Argumentos: id="user_id", direccion="direccion_completa"
+        - Argumentos: id="cliente_id", direccion="direccion_completa"
         
         Si es "consulta_menu":
         - Si se solicita el menú completo: usa send_menu_message
@@ -144,12 +148,12 @@ class CustomerServicePrompts:
         Si es "crear_pedido":
         - SIEMPRE usa create_order para crear un pedido en pedidos_activos
         - Usa create_order 
-        - Argumentos: user_id="user_id", items=[], total=0.0, direccion_entrega="direccion_del_cliente"
+        - Argumentos: cliente_id="cliente_id", items=[], total=0.0, direccion_entrega="direccion_del_cliente" (si existe)
         - CRÍTICO: Esto debe ejecutarse ANTES de agregar productos
         
         Si es "seleccion_productos":
-        - PRIMERO: Verifica si existe pedido activo con get_active_order_by_client(user_id: "user_id")
-        - Si NO existe pedido activo: USA create_order(user_id="user_id", items=[], total=0.0, direccion_entrega="direccion_del_cliente") PRIMERO
+        - PRIMERO: Verifica si existe pedido activo con get_active_order_by_client(cliente_id: "cliente_id")
+        - Si NO existe pedido activo: USA create_order(cliente_id="cliente_id", items=[], total=0.0, direccion_entrega="direccion_del_cliente" (si existe)) PRIMERO
         - LUEGO: Si menciona pizza: usa get_pizza_by_name con name="nombre_pizza_exacto"
                  Si menciona pizza y tamaño: usa get_pizza_by_name_and_size con name="nombre_pizza_exacto", size="tamaño_pizza_exacto"
         - LUEGO: Si menciona bebida: usa get_beverage_by_name con name="nombre_bebida_exacto"
@@ -160,7 +164,7 @@ class CustomerServicePrompts:
         - IMPORTANTE: Solo actualizar pedido cuando el usuario CONFIRME explícitamente
         
         Si es "finalizacion":
-        - Si el usuario proporciona método de pago: usa finish_order con user_id="user_id"
+        - Si el usuario proporciona método de pago: usa finish_order con cliente_id="cliente_id"
         - Esto moverá el pedido de activos a finalizados
         
         EJEMPLOS DE USO:
@@ -174,10 +178,10 @@ class CustomerServicePrompts:
         - Usa argumentos específicos, nunca argumentos vacíos {{}}
         """
         
-    def tools_execution_user(self, user_id, order_items, section):
+    def tools_execution_user(self, cliente_id, order_items, section):
         return f"""
         INFORMACIÓN DEL USUARIO:
-        - User ID: {user_id}
+        - User ID: {cliente_id}
         - Pedido actual: {order_items}
         
         SECCIÓN A PROCESAR:
@@ -186,26 +190,44 @@ class CustomerServicePrompts:
         
         RECUERDA: Extrae la información específica del texto del action, no uses argumentos vacíos.
         """
-
-        
-    def product_selection_prompt(self, section, user_id):
+    
+    def confirmation_prompt(self, order_data):
         return f"""
-        SELECCIÓN DE PRODUCTOS - USUARIO: {user_id}
+        CONFIRMACIÓN DE PEDIDO:
         
-        ACCIÓN DEL USUARIO: {section["action"]}
+        El usuario ha confirmado su pedido. Procede a crear el pedido en la base de datos.
         
-        FLUJO OBLIGATORIO:
-        1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{user_id}"}})
-        2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{user_id}", "items": [], "total": 0.0}})
-        3. LUEGO: Buscar el producto mencionado:
-            - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
-            - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
-        4. El producto se agregará automáticamente al pedido en el siguiente paso
+        DATOS DEL PEDIDO:  
+        - Cliente ID: {order_data['cliente_id']}
+        - Productos: {len(order_data['items'])} items
+        - Total: ${order_data['total']}
         
-        EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
-        
-        IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
+        USA LA HERRAMIENTA: create_order con estos argumentos exactos:
+        - cliente_id: "{order_data['cliente_id']}"
+        - items: {order_data['items']}
+        - total: {order_data['total']}
         """
+    
+    
+        
+    def product_selection_prompt(self, section, cliente_id):
+        return f"""
+            SELECCIÓN DE PRODUCTOS - USUARIO: {cliente_id}
+            
+            ACCIÓN DEL USUARIO: {section["action"]}
+            
+            FLUJO OBLIGATORIO:
+            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{cliente_id}"}})
+            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{cliente_id}", "items": [], "total": 0.0}})
+            3. LUEGO: Buscar el producto mencionado:
+               - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
+               - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
+            4. El producto se agregará automáticamente al pedido en el siguiente paso
+            
+            EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
+            
+            IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
+            """
             
     def confirmation_user(self, order_data):
         return f"""

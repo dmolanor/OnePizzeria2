@@ -125,26 +125,26 @@ class ChatStateManager:
     def __init__(self):
         self.memory_manager = memory
     
-    async def load_state_for_user(self, user_id: str, new_message: str) -> ChatState:
+    async def load_state_for_user(self, cliente_id: str, new_message: str) -> ChatState:
         """
         Load complete chat state for a user including memory.
         """
         try:
             # Get conversation context from  memory
-            context = await self.memory_manager.get_conversation(user_id)
+            context = await self.memory_manager.get_conversation(cliente_id)
             
             # Get customer data from database
             try:
-                from .tools import get_customer
-                customer = get_customer.invoke({"user_id": user_id})
+                from .tools import get_client_by_id
+                customer = get_client_by_id.invoke({"cliente_id": cliente_id})
             except (ImportError, Exception) as e:
                 print(f"Warning: Could not get customer data: {e}")
                 customer = None
             
             # Get active order if exists
             try:
-                from .tools import get_active_order
-                active_order = get_active_order.invoke({"user_id": user_id})
+                from .tools import get_active_order_by_client
+                active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
             except (ImportError, Exception) as e:
                 print(f"Warning: Could not get active order: {e}")
                 active_order = None
@@ -165,7 +165,7 @@ class ChatStateManager:
             current_step = self._determine_current_step(context, new_message.content, needs_customer_info)
             
             state = ChatState(
-                user_id=user_id,
+                cliente_id=cliente_id,
                 messages=historical_messages,
                 customer=customer,
                 current_step=current_step,
@@ -174,18 +174,18 @@ class ChatStateManager:
                 ready_to_order=ready_to_order
             )
             
-            logger.info(f"Loaded state for {user_id}: {len(historical_messages)} messages, step: {current_step}")
+            logger.info(f"Loaded state for {cliente_id}: {len(historical_messages)} messages, step: {current_step}")
             return state
             
         except Exception as e:
-            logger.error(f"Error loading state for {user_id}: {e}")
+            logger.error(f"Error loading state for {cliente_id}: {e}")
             # Return minimal state on error
             from langchain_core.messages import HumanMessage
 
             from .state import ChatState
             
             return ChatState(
-                user_id=user_id,
+                cliente_id=cliente_id,
                 #messages=[HumanMessage(content=new_message)],
                 customer={},
                 current_step="greeting",
@@ -199,7 +199,7 @@ class ChatStateManager:
         Save chat state to  memory.
         """
         try:
-            user_id = state["user_id"]
+            cliente_id = state["cliente_id"]
             
             # Save the AI response to conversation memory
             from langchain_core.messages import AIMessage
@@ -209,15 +209,15 @@ class ChatStateManager:
             if state["messages"]:
                 # Add the human message (last one in state)
                 human_message = state["messages"][-1]
-                await self.memory_manager.add_message(user_id, human_message)
+                await self.memory_manager.add_message(cliente_id, human_message)
             
             # Add the AI response
-            await self.memory_manager.add_message(user_id, ai_message)
+            await self.memory_manager.add_message(cliente_id, ai_message)
             
             # Update customer context if we have relevant info
             if state.get("customer") and state["customer"].get("first_name"):
                 await self.memory_manager.update_customer_context(
-                    user_id, 
+                    cliente_id, 
                     "customer_name", 
                     f"{state['customer'].get('first_name', '')} {state['customer'].get('last_name', '')}"
                 )
@@ -225,15 +225,15 @@ class ChatStateManager:
             # Update order context if we have an active order
             if state.get("active_order") and state["active_order"]:
                 await self.memory_manager.update_customer_context(
-                    user_id,
+                    cliente_id,
                     "current_order",
                     state["active_order"]
                 )
             
-            logger.info(f"Saved state for {user_id}")
+            logger.info(f"Saved state for {cliente_id}")
             
         except Exception as e:
-            logger.error(f"Error saving state for {user_id}: {e}")
+            logger.error(f"Error saving state for {cliente_id}: {e}")
     
     def _determine_current_step(self, context: ConversationContext, new_message: str, needs_customer_info: bool) -> str:
         """
