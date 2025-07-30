@@ -222,12 +222,12 @@
   {
     "table_name": "clientes",
     "column_name": "nombre_completo",
-    "data_type": "character varying",
-    "character_maximum_length": 200,
+    "data_type": "text",
+    "character_maximum_length": null,
     "numeric_precision": null,
     "numeric_scale": null,
     "column_default": null,
-    "is_nullable": "NO"
+    "is_nullable": "YES"
   },
   {
     "table_name": "clientes",
@@ -237,33 +237,33 @@
     "numeric_precision": null,
     "numeric_scale": null,
     "column_default": null,
-    "is_nullable": "NO"
+    "is_nullable": "YES"
   },
   {
     "table_name": "clientes",
     "column_name": "apellido",
-    "data_type": "character varying",
-    "character_maximum_length": 100,
+    "data_type": "text",
+    "character_maximum_length": null,
     "numeric_precision": null,
     "numeric_scale": null,
     "column_default": null,
-    "is_nullable": "NO"
+    "is_nullable": "YES"
   },
   {
     "table_name": "clientes",
     "column_name": "telefono",
-    "data_type": "character varying",
-    "character_maximum_length": 20,
+    "data_type": "text",
+    "character_maximum_length": null,
     "numeric_precision": null,
     "numeric_scale": null,
     "column_default": null,
-    "is_nullable": "NO"
+    "is_nullable": "YES"
   },
   {
     "table_name": "clientes",
     "column_name": "correo",
-    "data_type": "character varying",
-    "character_maximum_length": 255,
+    "data_type": "text",
+    "character_maximum_length": null,
     "numeric_precision": null,
     "numeric_scale": null,
     "column_default": null,
@@ -388,6 +388,126 @@
     "numeric_scale": null,
     "column_default": "true",
     "is_nullable": "NO"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "cliente_id",
+    "data_type": "text",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "NO"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "direccion_id",
+    "data_type": "bigint",
+    "character_maximum_length": null,
+    "numeric_precision": 64,
+    "numeric_scale": 0,
+    "column_default": null,
+    "is_nullable": "NO"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "direccion_completa",
+    "data_type": "text",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "NO"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "base_direccion",
+    "data_type": "text",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "YES"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "detalles",
+    "data_type": "jsonb",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "YES"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "ciudad",
+    "data_type": "text",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "NO"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "lat",
+    "data_type": "double precision",
+    "character_maximum_length": null,
+    "numeric_precision": 53,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "YES"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "lon",
+    "data_type": "double precision",
+    "character_maximum_length": null,
+    "numeric_precision": 53,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "YES"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "is_desfault",
+    "data_type": "boolean",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": "false",
+    "is_nullable": "NO"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "creado_el",
+    "data_type": "timestamp with time zone",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": "now()",
+    "is_nullable": "NO"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "actualizado_el",
+    "data_type": "timestamp with time zone",
+    "character_maximum_length": null,
+    "numeric_precision": null,
+    "numeric_scale": null,
+    "column_default": "now()",
+    "is_nullable": "NO"
+  },
+  {
+    "table_name": "direcciones_clientes",
+    "column_name": "distancia",
+    "data_type": "double precision",
+    "character_maximum_length": null,
+    "numeric_precision": 53,
+    "numeric_scale": null,
+    "column_default": null,
+    "is_nullable": "YES"
   },
   {
     "table_name": "ingredientes",
