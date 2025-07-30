@@ -1,4 +1,3 @@
-from contextlib import nullcontext
 import os
 
 from langchain_core.tools import tool
@@ -47,13 +46,15 @@ def get_active_order_by_client(cliente_id: str) -> dict:
     try:
         result = supabase.table("pedidos_activos").select("*").eq("cliente_id", cliente_id).execute()
         if result.data:
-            return {"success": "Se ha encontrado un pedido activo", "data": result.data[0]}  # Retorna el primer pedido activo encontrado
+            return result.data[0]  # Retorna el primer pedido activo encontrado
         else:
-            return {"fail": f"No hay pedido activo para el cliente {cliente_id}","data": {}}
+            return {"error": f"No hay pedido activo para el cliente {cliente_id}"}
     except Exception as e:
         return {"error": f"Error al buscar pedido activo: {str(e)}"}
+    
+    
 @tool
-def create_order(cliente_id: str, items: list = None, total: float = 0.0, direccion_entrega: str = NULL, estado: str = "PREPARANDO") -> dict:
+def create_order(cliente_id: str, items: list = None, total: float = 0.0, direccion_entrega: str = None, estado: str = "PREPARANDO") -> dict:
     """
     Crea un nuevo pedido activo.
     
@@ -89,6 +90,8 @@ def create_order(cliente_id: str, items: list = None, total: float = 0.0, direcc
         return {"success": "Pedido creado exitosamente", "data": result.data}
     except Exception as e:
         return {"error": f"Error al crear pedido: {str(e)}"}
+    
+    
 @tool
 def update_order(id: int, items: list = None, total: float = None, direccion_entrega: str = None, metodo_pago: str = None, estado: str = None) -> dict:
     """
@@ -140,6 +143,8 @@ def update_order(id: int, items: list = None, total: float = None, direccion_ent
         return {"success": "Pedido actualizado exitosamente", "data": result.data}
     except Exception as e:
         return {"error": f"Error al actualizar pedido: {str(e)}"}
+    
+    
 @tool
 def delete_order(id: int) -> dict:
     """Elimina un pedido activo"""
@@ -148,7 +153,437 @@ def delete_order(id: int) -> dict:
         return {"success": "Pedido eliminado exitosamente"}
     except Exception as e:
         return {"error": f"Error al eliminar pedido: {str(e)}"}
-@tool    
+
+
+@tool
+def get_order_total(id: int, items: list = None) -> dict:
+    """
+    Obtiene el total de un pedido activo.
+    
+    Args:
+        id: ID del pedido activo
+        items: Lista de items (no se usa, mantenido por compatibilidad)
+        
+    Returns:
+        dict: Resultado con el total del pedido
+    """
+    try:
+        result = supabase.table("pedidos_activos").select("*").eq("id", id).execute()
+        if not result.data:
+            return {"error": f"Pedido con ID {id} no encontrado"}
+            
+        order_data = result.data[0]
+        order_items = order_data.get("pedido", {}).get("items", [])
+        
+        total = 0
+        for item in order_items:
+            # Use total_price if available, otherwise use precio or base_price
+            item_price = item.get("total_price", item.get("precio", item.get("base_price", 0)))
+            total += float(item_price)
+            
+        return {"success": "Total del pedido obtenido exitosamente", "data": total}
+    except Exception as e:
+        return {"error": f"Error al obtener total del pedido: {str(e)}"}
+
+
+@tool
+def add_product_to_order(cliente_id: str, product_data: dict, borde: dict = None, adiciones: list = None) -> dict:
+    """
+    Agrega un producto estructurado al pedido activo de un cliente.
+    
+    Args:
+        cliente_id: ID del cliente (string)
+        product_data: Datos del producto (debe incluir: id, nombre, tipo, precio)
+        borde: Información del borde (opcional) - dict con nombre y precio_adicional
+        adiciones: Lista de adiciones (opcional) - list de dicts con nombre y precio_adicional
+        
+    Returns:
+        dict: Resultado de la operación
+        
+    Example:
+        add_product_to_order(
+            "7315133184",
+            {"id": "1", "nombre": "Pepperoni", "tipo": "pizza", "precio": 25000},
+            {"nombre": "pimentón", "precio_adicional": 2000},
+            [{"nombre": "queso extra", "precio_adicional": 5000}]
+        )
+    """
+    try:
+        from src.state import ProductDetails
+
+        # Get or create active order
+        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        
+        if "error" in active_order:
+            # Create new order if none exists
+            create_result = create_order.invoke({"cliente_id": cliente_id, "items": [], "total": 0.0})
+            if "error" in create_result:
+                return create_result
+            active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+            if "error" in active_order:
+                return {"error": "Failed to create or retrieve order"}
+        
+        order_id = active_order["id"]
+        current_pedido = active_order.get("pedido", {})
+        current_items = current_pedido.get("items", [])
+        
+        # Create structured product using ProductDetails
+        base_price = float(product_data.get("precio", product_data.get("price", 0)))
+        total_price = base_price
+        
+        # Calculate borde price
+        borde_data = {}
+        if borde and product_data.get("tipo", "").lower() == "pizza":
+            borde_data = {
+                "nombre": borde.get("nombre", ""),
+                "precio_adicional": float(borde.get("precio_adicional", 0))
+            }
+            total_price += borde_data["precio_adicional"]
+        
+        # Calculate adiciones price
+        adiciones_data = []
+        if adiciones and product_data.get("tipo", "").lower() == "pizza":
+            for adicion in adiciones:
+                adicion_data = {
+                    "nombre": adicion.get("nombre", ""),
+                    "precio_adicional": float(adicion.get("precio_adicional", 0))
+                }
+                adiciones_data.append(adicion_data)
+                total_price += adicion_data["precio_adicional"]
+        
+        # Create structured product dict following ProductDetails schema
+        structured_product = {
+            "product_id": str(product_data.get("id", "")),
+            "product_name": product_data.get("nombre", product_data.get("nombre_producto", "")),
+            "product_type": product_data.get("tipo", "pizza" if "categoria" in product_data else "bebida"),
+            "base_price": base_price,
+            "total_price": total_price,
+            "borde": borde_data,
+            "adiciones": adiciones_data,
+            # Additional fields for compatibility
+            "id": str(product_data.get("id", "")),
+            "nombre": product_data.get("nombre", product_data.get("nombre_producto", "")),
+            "tipo": product_data.get("tipo", "pizza" if "categoria" in product_data else "bebida"),
+            "precio": total_price,
+            "tamano": product_data.get("tamano", ""),
+            "categoria": product_data.get("categoria", ""),
+            "descripcion": product_data.get("descripcion", product_data.get("texto_ingredientes", "")),
+            "activo": product_data.get("activo", True)
+        }
+        
+        # Add to current items
+        current_items.append(structured_product)
+        
+        # Calculate new total
+        new_total = sum(item.get("total_price", item.get("precio", 0)) for item in current_items)
+        
+        # Update the order
+        update_result = update_order.invoke({
+            "id": order_id,
+            "items": current_items,
+            "total": new_total
+        })
+        
+        if "success" in update_result:
+            return {
+                "success": f"Producto '{structured_product['product_name']}' agregado exitosamente al pedido",
+                "data": {
+                    "product": structured_product,
+                    "order_total": new_total,
+                    "order_id": order_id
+                }
+            }
+        else:
+            return update_result
+            
+    except Exception as e:
+        return {"error": f"Error al agregar producto al pedido: {str(e)}"}
+
+
+@tool
+def remove_product_from_order(cliente_id: str, product_id: str) -> dict:
+    """
+    Remueve un producto del pedido activo de un cliente.
+    
+    Args:
+        cliente_id: ID del cliente (string)
+        product_id: ID del producto a remover (string)
+        
+    Returns:
+        dict: Resultado de la operación
+    """
+    try:
+        # Get active order
+        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        
+        if "error" in active_order:
+            return {"error": "No hay pedido activo para este cliente"}
+        
+        order_id = active_order["id"]
+        current_pedido = active_order.get("pedido", {})
+        current_items = current_pedido.get("items", [])
+        
+        # Find and remove the product
+        updated_items = []
+        removed_product = None
+        
+        for item in current_items:
+            if str(item.get("product_id", item.get("id", ""))) == str(product_id):
+                removed_product = item
+            else:
+                updated_items.append(item)
+        
+        if not removed_product:
+            return {"error": f"Producto con ID {product_id} no encontrado en el pedido"}
+        
+        # Calculate new total
+        new_total = sum(item.get("total_price", item.get("precio", 0)) for item in updated_items)
+        
+        # Update the order
+        update_result = update_order.invoke({
+            "id": order_id,
+            "items": updated_items,
+            "total": new_total
+        })
+        
+        if "success" in update_result:
+            return {
+                "success": f"Producto '{removed_product.get('product_name', removed_product.get('nombre', 'Unknown'))}' removido exitosamente del pedido",
+                "data": {
+                    "removed_product": removed_product,
+                    "order_total": new_total,
+                    "remaining_items": len(updated_items)
+                }
+            }
+        else:
+            return update_result
+            
+    except Exception as e:
+        return {"error": f"Error al remover producto del pedido: {str(e)}"}
+
+
+@tool
+def update_product_in_order(cliente_id: str, product_id: str, new_borde: dict = None, new_adiciones: list = None) -> dict:
+    """
+    Actualiza las personalizaciones de un producto en el pedido activo.
+    
+    Args:
+        cliente_id: ID del cliente (string)
+        product_id: ID del producto a actualizar (string)
+        new_borde: Nuevo borde (opcional) - dict con nombre y precio_adicional
+        new_adiciones: Nuevas adiciones (opcional) - list de dicts con nombre y precio_adicional
+        
+    Returns:
+        dict: Resultado de la operación
+    """
+    try:
+        # Get active order
+        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        
+        if "error" in active_order:
+            return {"error": "No hay pedido activo para este cliente"}
+        
+        order_id = active_order["id"]
+        current_pedido = active_order.get("pedido", {})
+        current_items = current_pedido.get("items", [])
+        
+        # Find and update the product
+        updated_items = []
+        updated_product = None
+        
+        for item in current_items:
+            if str(item.get("product_id", item.get("id", ""))) == str(product_id):
+                # This is the product to update
+                updated_item = item.copy()
+                
+                # Recalculate price starting from base price
+                base_price = float(updated_item.get("base_price", updated_item.get("precio", 0)))
+                new_total_price = base_price
+                
+                # Update borde if provided and product is pizza
+                if new_borde is not None and updated_item.get("product_type", updated_item.get("tipo", "")).lower() == "pizza":
+                    updated_item["borde"] = {
+                        "nombre": new_borde.get("nombre", ""),
+                        "precio_adicional": float(new_borde.get("precio_adicional", 0))
+                    }
+                    new_total_price += updated_item["borde"]["precio_adicional"]
+                else:
+                    # Keep existing borde if not updating
+                    existing_borde = updated_item.get("borde", {})
+                    if existing_borde and existing_borde.get("precio_adicional"):
+                        new_total_price += float(existing_borde["precio_adicional"])
+                
+                # Update adiciones if provided and product is pizza
+                if new_adiciones is not None and updated_item.get("product_type", updated_item.get("tipo", "")).lower() == "pizza":
+                    updated_item["adiciones"] = []
+                    for adicion in new_adiciones:
+                        adicion_data = {
+                            "nombre": adicion.get("nombre", ""),
+                            "precio_adicional": float(adicion.get("precio_adicional", 0))
+                        }
+                        updated_item["adiciones"].append(adicion_data)
+                        new_total_price += adicion_data["precio_adicional"]
+                else:
+                    # Keep existing adiciones if not updating
+                    existing_adiciones = updated_item.get("adiciones", [])
+                    for adicion in existing_adiciones:
+                        if adicion.get("precio_adicional"):
+                            new_total_price += float(adicion["precio_adicional"])
+                
+                # Update prices
+                updated_item["total_price"] = new_total_price
+                updated_item["precio"] = new_total_price  # For compatibility
+                
+                updated_items.append(updated_item)
+                updated_product = updated_item
+            else:
+                updated_items.append(item)
+        
+        if not updated_product:
+            return {"error": f"Producto con ID {product_id} no encontrado en el pedido"}
+        
+        # Calculate new order total
+        new_total = sum(item.get("total_price", item.get("precio", 0)) for item in updated_items)
+        
+        # Update the order
+        update_result = update_order.invoke({
+            "id": order_id,
+            "items": updated_items,
+            "total": new_total
+        })
+        
+        if "success" in update_result:
+            return {
+                "success": f"Producto '{updated_product.get('product_name', updated_product.get('nombre', 'Unknown'))}' actualizado exitosamente",
+                "data": {
+                    "updated_product": updated_product,
+                    "order_total": new_total
+                }
+            }
+        else:
+            return update_result
+            
+    except Exception as e:
+        return {"error": f"Error al actualizar producto en el pedido: {str(e)}"}
+
+
+@tool 
+def calculate_order_total(cliente_id: str) -> dict:
+    """
+    Calcula el total correcto del pedido activo de un cliente.
+    
+    Args:
+        cliente_id: ID del cliente (string)
+        
+    Returns:
+        dict: Resultado con el total calculado y desglose de items
+    """
+    try:
+        # Get active order
+        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        
+        if "error" in active_order:
+            return {"error": "No hay pedido activo para este cliente"}
+        
+        current_pedido = active_order.get("pedido", {})
+        current_items = current_pedido.get("items", [])
+        
+        total = 0
+        items_breakdown = []
+        
+        for item in current_items:
+            item_total = float(item.get("total_price", item.get("precio", item.get("base_price", 0))))
+            total += item_total
+            
+            # Create breakdown for this item
+            breakdown = {
+                "product_name": item.get("product_name", item.get("nombre", "Unknown")),
+                "base_price": float(item.get("base_price", item.get("precio", 0))),
+                "total_price": item_total,
+                "borde": item.get("borde", {}),
+                "adiciones": item.get("adiciones", [])
+            }
+            items_breakdown.append(breakdown)
+        
+        return {
+            "success": "Total del pedido calculado exitosamente",
+            "data": {
+                "total": total,
+                "items_count": len(current_items),
+                "items_breakdown": items_breakdown,
+                "order_id": active_order["id"]
+            }
+        }
+        
+    except Exception as e:
+        return {"error": f"Error al calcular total del pedido: {str(e)}"}
+
+
+@tool
+def get_order_details(cliente_id: str) -> dict:
+    """
+    Obtiene los detalles completos del pedido activo de un cliente.
+    
+    Args:
+        cliente_id: ID del cliente (string)
+        
+    Returns:
+        dict: Detalles completos del pedido con productos estructurados
+    """
+    try:
+        # Get active order
+        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        
+        if "error" in active_order:
+            return {"error": "No hay pedido activo para este cliente"}
+        
+        current_pedido = active_order.get("pedido", {})
+        current_items = current_pedido.get("items", [])
+        
+        # Calculate total
+        total = sum(float(item.get("total_price", item.get("precio", 0))) for item in current_items)
+        
+        # Format products for display
+        formatted_products = []
+        for item in current_items:
+            product_info = {
+                "id": item.get("product_id", item.get("id", "")),
+                "name": item.get("product_name", item.get("nombre", "")),
+                "type": item.get("product_type", item.get("tipo", "")),
+                "base_price": float(item.get("base_price", 0)),
+                "total_price": float(item.get("total_price", item.get("precio", 0))),
+                "customizations": {
+                    "borde": item.get("borde", {}),
+                    "adiciones": item.get("adiciones", [])
+                },
+                "details": {
+                    "tamano": item.get("tamano", ""),
+                    "categoria": item.get("categoria", ""),
+                    "descripcion": item.get("descripcion", "")
+                }
+            }
+            formatted_products.append(product_info)
+        
+        return {
+            "success": "Detalles del pedido obtenidos exitosamente",
+            "data": {
+                "order_id": active_order["id"],
+                "cliente_id": cliente_id,
+                "estado": active_order.get("estado", ""),
+                "direccion_entrega": active_order.get("direccion_entrega", ""),
+                "metodo_pago": active_order.get("metodo_pago", ""),
+                "total": total,
+                "items_count": len(current_items),
+                "products": formatted_products,
+                "created_at": active_order.get("hora_ultimo_mensaje", "")
+            }
+        }
+        
+    except Exception as e:
+        return {"error": f"Error al obtener detalles del pedido: {str(e)}"}
+    
+    
+@tool
 def finish_order(cliente_id: str) -> dict:
     """
     Finaliza el pedido activo de un cliente y lo mueve a pedidos finalizados.
@@ -186,18 +621,19 @@ def finish_order(cliente_id: str) -> dict:
     except Exception as e:
         return {"error": f"Error al finalizar pedido: {str(e)}"}
 
+
 #==========================================================#
 #---------------------- CLIENT TOOLS ----------------------#
 #==========================================================#
 
 
 @tool
-def get_client_by_id(cliente_id: str) -> dict:
+def get_client_by_id(user_id: str) -> dict:
     """
     Retorna la información de un cliente a partir de su ID de Telegram.
     
     Args:
-        cliente_id: El ID del usuario de Telegram (como string)
+        user_id: El ID del usuario de Telegram (como string)
         
     Returns:
         dict: Los datos del cliente si existe
@@ -206,11 +642,11 @@ def get_client_by_id(cliente_id: str) -> dict:
         get_client_by_id("7315133184")
     """
     try:
-        result = supabase.table("clientes").select("*").eq("id", cliente_id).execute()
+        result = supabase.table("clientes").select("*").eq("id", user_id).execute()
         if result.data:
             return result.data[0]
         else:
-            return {"error": f"Cliente con ID {cliente_id} no encontrado"}
+            return {"error": f"Cliente con ID {user_id} no encontrado"}
     except Exception as e:
         return {"error": f"Error al buscar cliente: {str(e)}"}
 
@@ -550,6 +986,196 @@ def get_border_by_name( name: str) -> dict:
         return {"error": f"Error al buscar borde: {str(e)}"}
 
 
+@tool
+def get_border_price_by_name(name: str) -> dict:
+    """
+    Obtiene el precio de un borde por su nombre desde la base de datos.
+    
+    Args:
+        name: Nombre del borde a buscar
+        
+    Returns:
+        dict: Precio del borde si existe
+    """
+    try:
+        # Buscar con nombre exacto primero
+        result = supabase.table("bordes").select("*").eq("nombre", name).execute()
+        
+        if not result.data:
+            # Buscar con ilike para mayor flexibilidad
+            result = supabase.table("bordes").select("*").ilike("nombre", f"%{name}%").execute()
+        
+        if result.data:
+            borde_data = result.data[0]
+            return {
+                "success": "Borde encontrado",
+                "data": {
+                    "nombre": borde_data.get("nombre", ""),
+                    "precio_adicional": float(borde_data.get("precio", 0))
+                }
+            }
+        else:
+            return {"error": f"Borde '{name}' no encontrado"}
+    except Exception as e:
+        return {"error": f"Error al buscar precio del borde: {str(e)}"}
+
+
+@tool
+def get_adition_price_by_name(name: str) -> dict:
+    """
+    Obtiene el precio de una adición por su nombre desde la base de datos.
+    
+    Args:
+        name: Nombre de la adición a buscar
+        
+    Returns:
+        dict: Precio de la adición si existe
+    """
+    try:
+        # Buscar con nombre exacto primero
+        result = supabase.table("adiciones").select("*").eq("nombre", name).execute()
+        
+        if not result.data:
+            # Buscar con ilike para mayor flexibilidad
+            result = supabase.table("adiciones").select("*").ilike("nombre", f"%{name}%").execute()
+        
+        if result.data:
+            adicion_data = result.data[0]
+            return {
+                "success": "Adición encontrada",
+                "data": {
+                    "nombre": adicion_data.get("nombre", ""),
+                    "precio_adicional": float(adicion_data.get("precio", 0))
+                }
+            }
+        else:
+            return {"error": f"Adición '{name}' no encontrada"}
+    except Exception as e:
+        return {"error": f"Error al buscar precio de la adición: {str(e)}"}
+
+
+@tool
+def add_product_to_order_smart(cliente_id: str, product_data: dict, borde_name: str = None, adiciones_names: list = None) -> dict:
+    """
+    Agrega un producto al pedido obteniendo automáticamente los precios de bordes y adiciones desde la BD.
+    
+    Args:
+        cliente_id: ID del cliente (string)
+        product_data: Datos del producto (debe incluir: id, nombre, tipo, precio)
+        borde_name: Nombre del borde (opcional) - se buscarán los precios automáticamente
+        adiciones_names: Lista de nombres de adiciones (opcional) - se buscarán los precios automáticamente
+        
+    Returns:
+        dict: Resultado de la operación
+        
+    Example:
+        add_product_to_order_smart(
+            "7315133184",
+            {"id": "1", "nombre": "Pepperoni", "tipo": "pizza", "precio": 25000},
+            "pimentón",
+            ["queso extra", "champiñones"]
+        )
+    """
+    try:
+        borde_data = None
+        adiciones_data = []
+        
+        # Get borde price from database if specified
+        if borde_name and product_data.get("tipo", "").lower() == "pizza":
+            borde_result = get_border_price_by_name.invoke({"name": borde_name})
+            if "success" in borde_result:
+                borde_data = borde_result["data"]
+            else:
+                # Use default price if not found
+                borde_data = {
+                    "nombre": borde_name,
+                    "precio_adicional": 2000  # Default fallback
+                }
+                print(f"⚠️ Borde '{borde_name}' not found in DB, using default price")
+        
+        # Get adiciones prices from database if specified
+        if adiciones_names and product_data.get("tipo", "").lower() == "pizza":
+            for adicion_name in adiciones_names:
+                adicion_result = get_adition_price_by_name.invoke({"name": adicion_name})
+                if "success" in adicion_result:
+                    adiciones_data.append(adicion_result["data"])
+                else:
+                    # Use default price if not found
+                    adiciones_data.append({
+                        "nombre": adicion_name,
+                        "precio_adicional": 5000  # Default fallback
+                    })
+                    print(f"⚠️ Adición '{adicion_name}' not found in DB, using default price")
+        
+        # Call the base add_product_to_order function with the fetched data
+        return add_product_to_order.invoke({
+            "cliente_id": cliente_id,
+            "product_data": product_data,
+            "borde": borde_data,
+            "adiciones": adiciones_data
+        })
+        
+    except Exception as e:
+        return {"error": f"Error al agregar producto inteligente al pedido: {str(e)}"}
+
+
+@tool
+def update_product_in_order_smart(cliente_id: str, product_id: str, new_borde_name: str = None, new_adiciones_names: list = None) -> dict:
+    """
+    Actualiza un producto en el pedido obteniendo automáticamente los precios de bordes y adiciones desde la BD.
+    
+    Args:
+        cliente_id: ID del cliente (string)
+        product_id: ID del producto a actualizar (string)
+        new_borde_name: Nuevo nombre del borde (opcional) - se buscarán los precios automáticamente
+        new_adiciones_names: Nuevos nombres de adiciones (opcional) - se buscarán los precios automáticamente
+        
+    Returns:
+        dict: Resultado de la operación
+    """
+    try:
+        new_borde_data = None
+        new_adiciones_data = []
+        
+        # Get borde price from database if specified
+        if new_borde_name:
+            borde_result = get_border_price_by_name.invoke({"name": new_borde_name})
+            if "success" in borde_result:
+                new_borde_data = borde_result["data"]
+            else:
+                # Use default price if not found
+                new_borde_data = {
+                    "nombre": new_borde_name,
+                    "precio_adicional": 2000  # Default fallback
+                }
+                print(f"⚠️ Borde '{new_borde_name}' not found in DB, using default price")
+        
+        # Get adiciones prices from database if specified
+        if new_adiciones_names:
+            for adicion_name in new_adiciones_names:
+                adicion_result = get_adition_price_by_name.invoke({"name": adicion_name})
+                if "success" in adicion_result:
+                    new_adiciones_data.append(adicion_result["data"])
+                else:
+                    # Use default price if not found
+                    new_adiciones_data.append({
+                        "nombre": adicion_name,
+                        "precio_adicional": 5000  # Default fallback
+                    })
+                    print(f"⚠️ Adición '{adicion_name}' not found in DB, using default price")
+        
+        # Call the base update_product_in_order function with the fetched data
+        return update_product_in_order.invoke({
+            "cliente_id": cliente_id,
+            "product_id": product_id,
+            "new_borde": new_borde_data,
+            "new_adiciones": new_adiciones_data
+        })
+        
+    except Exception as e:
+        return {"error": f"Error al actualizar producto inteligente en el pedido: {str(e)}"}
+
+
 #=========================================================#
 #-------------------- TELEGRAM TOOLS --------------------#
 #=========================================================#
@@ -759,9 +1385,11 @@ def send_pdf_document(file_path: str = None, caption: str = None) -> dict:
 
 # Actualizar las listas de herramientas
 CUSTOMER_TOOLS = [get_client_by_id, create_client, update_client]
-ORDER_TOOLS = [get_order_by_id, get_active_order_by_client, create_order, update_order, delete_order, finish_order]  # Removed get_menu - only use search_menu and send_full_menu
+ORDER_TOOLS = [get_order_by_id, get_active_order_by_client, create_order, update_order, delete_order, get_order_total, finish_order]
+PRODUCT_ORDER_TOOLS = [add_product_to_order, remove_product_from_order, update_product_in_order, calculate_order_total, get_order_details]
+SMART_PRODUCT_TOOLS = [add_product_to_order_smart, update_product_in_order_smart, get_border_price_by_name, get_adition_price_by_name]
 MENU_TOOLS = [get_pizza_by_name, get_beverage_by_name, get_adition_by_name, get_border_by_name, get_combo_by_name, get_combos, get_borders, get_beverages]
 TELEGRAM_TOOLS = [send_text_message, send_image_message, send_inline_keyboard, send_menu_message, send_order_summary, send_pdf_document]
 
 # Complete tool list for the agent
-ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS + TELEGRAM_TOOLS
+ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS + PRODUCT_ORDER_TOOLS + SMART_PRODUCT_TOOLS + TELEGRAM_TOOLS

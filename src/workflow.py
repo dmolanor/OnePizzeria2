@@ -209,7 +209,6 @@ class Workflow:
                 "divided_message": divided,
                 "order_states": existing_order_states,
                 "customer": customer,
-                "messages": [],
                 "active_order": state.get("active_order", {}),  # Preserve active_order
                 # Individual state fields for ChatState compatibility
                 "saludo": existing_order_states.get("saludo", 0),
@@ -354,6 +353,85 @@ class Workflow:
                         print(f"🍕 Searching for product: {tool_call['args']}")
             else:
                 print("⚠️ No tools called for product selection")
+        elif section["intent"] == "personalizacion_productos":
+            print("🎨 Detected personalizacion_productos intent - handling product customizations")
+            
+            personalization_prompt = f"""
+            PERSONALIZACIÓN DE PRODUCTOS - USUARIO: {cliente_id}
+            
+            ACCIÓN DEL USUARIO: {section["action"]}
+            
+            CONTEXTO: El cliente quiere personalizar un producto con bordes, adiciones o modificaciones.
+            
+            FLUJO:
+            1. PRIMERO: Obtener detalles del pedido actual con get_order_details({{"cliente_id": "{cliente_id}"}})
+            2. IDENTIFICAR: ¿Qué producto quiere personalizar? (si no está claro, el más reciente)
+            3. EXTRAER personalización específica del action: {section["action"]}
+            4. USAR: update_product_in_order_smart para aplicar la personalización
+            
+            PERSONALIZACIONES COMUNES:
+            - Bordes: ajo, queso, pimentón, tocineta, dulce
+            - Adiciones: queso extra, champiñones, tocineta, pepperoni, aceitunas
+            
+            EXTRAE del texto: nombres específicos de bordes y adiciones mencionados.
+            """
+            
+            personalization_context = [
+                SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
+                HumanMessage(content=personalization_prompt)
+            ]
+            
+            response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(personalization_context)
+            updated_state = {"messages": [response]}
+            
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                print(f"🎨 PERSONALIZATION: {[tc['name'] for tc in response.tool_calls]}")
+                for tool_call in response.tool_calls:
+                    print(f"Personalization Tool: {tool_call['name']}, Args: {tool_call['args']}")
+            else:
+                print("⚠️ No tools called for personalization")
+                
+        elif section["intent"] == "modificar_pedido":
+            print("✏️ Detected modificar_pedido intent - handling order modifications")
+            
+            modification_prompt = f"""
+            MODIFICACIÓN DE PEDIDO - USUARIO: {cliente_id}
+            
+            ACCIÓN DEL USUARIO: {section["action"]}
+            
+            CONTEXTO: El cliente quiere cambiar algo en su pedido actual.
+            
+            FLUJO:
+            1. PRIMERO: Obtener pedido actual con get_order_details({{"cliente_id": "{cliente_id}"}})
+            2. ANALIZAR: ¿Qué tipo de modificación quiere?
+               - Cambiar personalización: usar update_product_in_order_smart
+               - Remover producto: usar remove_product_from_order
+               - Agregar producto nuevo: usar add_product_to_order_smart
+            3. EXTRAER información específica del action: {section["action"]}
+            
+            TIPOS DE MODIFICACIÓN:
+            - "cambiar borde" → update_product_in_order_smart con new_borde_name
+            - "quitar producto" → remove_product_from_order
+            - "sin adición" → update_product_in_order_smart con new_adiciones_names=[]
+            - "agregar más" → add_product_to_order_smart
+            
+            IMPORTANTE: Identificar exactamente qué quiere cambiar del pedido actual.
+            """
+            
+            modification_context = [
+                SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
+                HumanMessage(content=modification_prompt)
+            ]
+            
+            response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(modification_context)
+            updated_state = {"messages": [response]}
+            
+            if hasattr(response, "tool_calls") and response.tool_calls:
+                print(f"✏️ MODIFICATION: {[tc['name'] for tc in response.tool_calls]}")
+                for tool_call in response.tool_calls:
+                    print(f"Modification Tool: {tool_call['name']}, Args: {tool_call['args']}")
+            else:
+                print("⚠️ No tools called for modification")
         else:
             print(f"Sending enhanced prompt to LLM with tools...")
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
@@ -398,7 +476,7 @@ class Workflow:
         cliente_id = state.get("cliente_id", "unknown")
         
         # Get existing active_order or create new one with proper structure
-        active_order_data = state.get("active_order", {
+        active_order = state.get("active_order", {
             "order_id": f"order_{cliente_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "order_date": datetime.now().isoformat(),
             "order_total": 0.0,
@@ -483,110 +561,56 @@ class Workflow:
                     
                     # Handle product search results (pizza or beverage found)
                     elif "precio" in tool_result and ("nombre" in tool_result or "nombre_producto" in tool_result):
-                        product_name = tool_result.get("nombre", tool_result.get("nombre_producto", ""))
-                        product_id = tool_result.get("id", "")
+                        print(f"🍕 Found product in tool result: {tool_result}")
                         
-                        # Check if this product is already in the order to prevent duplicates
-                        existing_product = None
-                        for item in active_order_data["order_items"]:
-                            if (item.get("product_id") == product_id and 
-                                item.get("product_name") == product_name):
-                                existing_product = item
-                                break
-                        
-                        if existing_product:
-                            print(f"⚠️ Product {product_name} already in order, skipping duplicate")
-                        else:
-                            print(f"🍕 Found new product: {tool_result}")
-                            
-                            # Create ProductDetails object using the class
-                            product_detail = ProductDetails(
-                                product_id=product_id,
-                                product_name=product_name,
-                                product_type="pizza" if "categoria" in tool_result else "bebida",
-                                base_price=float(tool_result.get("precio", 0)),
-                                total_price=float(tool_result.get("precio", 0)),
-                                borde={},
-                                adiciones=[]
-                            )
-                            
-                            # Convert to dict for state storage with complete product info
-                            product_dict = {
-                                "id": product_detail.product_id,
-                                "product_id": product_detail.product_id,
-                                "product_name": product_detail.product_name,
-                                "nombre": product_detail.product_name,  # Alternative name field
-                                "product_type": product_detail.product_type,
-                                "tipo": product_detail.product_type,  # Alternative type field
-                                "base_price": product_detail.base_price,
-                                "total_price": product_detail.total_price,
-                                "precio": product_detail.total_price,  # Alternative price field
-                                "borde": product_detail.borde,
-                                "adiciones": product_detail.adiciones,
-                                # Additional fields from the original tool result
+                        # Use the new smart product tool instead of manual sync
+                        try:
+                            from src.tools import add_product_to_order_smart
+
+                            # Extract product data
+                            product_data = {
+                                "id": tool_result.get("id", ""),
+                                "nombre": tool_result.get("nombre", tool_result.get("nombre_producto", "")),
+                                "tipo": "pizza" if "categoria" in tool_result else "bebida",
+                                "precio": float(tool_result.get("precio", 0)),
                                 "tamano": tool_result.get("tamano", ""),
                                 "categoria": tool_result.get("categoria", ""),
                                 "descripcion": tool_result.get("descripcion", tool_result.get("texto_ingredientes", "")),
                                 "activo": tool_result.get("activo", True)
                             }
                             
-                            # Add to local order items
-                            active_order_data["order_items"].append(product_dict)
-                            active_order_data["order_total"] += product_detail.total_price
-                            products_added = True
+                            # TODO: Extract borde and adiciones from user context if needed
+                            # For now, we'll add the basic product and let customizations be handled separately
                             
-                            print(f"✅ Added product to local order: {product_detail.product_name} - ${product_detail.total_price}")
-                            print(f"📦 Current local order total: ${active_order_data['order_total']}")
+                            add_result = add_product_to_order_smart(
+                                cliente_id=cliente_id,
+                                product_data=product_data
+                            )
                             
-                            # 🔥 CRITICAL: Sync with pedidos_activos immediately
-                            try:
-                                from src.tools import (
-                                    get_active_order_by_client, update_order)
-
-                                # Get active order from database
-                                db_order = get_active_order_by_client(cliente_id)
-                                
-                                if "error" not in db_order:
-                                    # Update existing order in database
-                                    order_id = db_order["id"]
-                                    current_pedido = db_order.get("pedido", {})
-                                    current_items = current_pedido.get("items", [])
-                                    
-                                    # Add the new product to the items list
-                                    current_items.append(product_dict)
-                                    current_total = sum(item.get("total_price", item.get("base_price", 0)) for item in current_items)
-                                    
-                                    # Update the order with new items and total
-                                    update_result = update_order(
-                                        id=order_id,
-                                        items=current_items,
-                                        total=current_total
-                                    )
-                                    
-                                    if "success" in update_result:
-                                        print(f"✅ Product synced to pedidos_activos: {product_detail.product_name}")
-                                        print(f"📦 Database updated with {len(current_items)} items, total: ${current_total}")
-                                    else:
-                                        print(f"❌ Failed to sync product to DB: {update_result}")
+                            if "success" in add_result:
+                                products_added = True
+                                # Update local active_order from database to keep state in sync
+                                from src.tools import \
+                                    get_active_order_by_client
+                                updated_order = get_active_order_by_client(cliente_id)
+                                if "error" not in updated_order:
+                                    active_order.update({
+                                        "order_id": str(updated_order["id"]),
+                                        "order_date": updated_order.get("hora_ultimo_mensaje", ""),
+                                        "order_total": add_result["data"]["order_total"],
+                                        "order_items": updated_order.get("pedido", {}).get("items", [])
+                                    })
+                                    print(f"✅ Product added successfully: {add_result['success']}")
+                                    print(f"📦 Updated order total: ${add_result['data']['order_total']}")
                                 else:
-                                    print(f"⚠️ No active order in DB to update: {db_order}")
-                                    # Try to create an order first
-                                    from src.tools import create_order
-                                    create_result = create_order(
-                                        cliente_id=cliente_id,
-                                        items=[product_dict],
-                                        total=product_detail.total_price,
-                                        direccion_entrega=None
-                                    )
-                                    if "success" in create_result:
-                                        print(f"✅ Created new order with product: {product_detail.product_name}")
-                                    else:
-                                        print(f"❌ Failed to create order with product: {create_result}")
-                                    
-                            except Exception as sync_error:
-                                print(f"❌ Error syncing product to DB: {sync_error}")
-                                import traceback
-                                print(f"Full traceback:\n{traceback.format_exc()}")
+                                    print(f"⚠️ Could not sync local state after adding product")
+                            else:
+                                print(f"❌ Failed to add product: {add_result}")
+                                
+                        except Exception as add_error:
+                            print(f"❌ Error adding product with smart tool: {add_error}")
+                            import traceback
+                            print(f"Full traceback:\n{traceback.format_exc()}")
                             
                 except (json.JSONDecodeError, KeyError) as e:
                     print(f"Error processing tool result: {e}")

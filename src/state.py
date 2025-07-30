@@ -246,8 +246,8 @@ class ChatState(TypedDict):
     """
     
     # Core conversation data - NOW WITH ENHANCED SMART REDUCER
-    #messages: Annotated[Sequence[BaseMessage], lambda x, y: x + y]
-    messages: Annotated[Sequence[BaseMessage], smart_message_reducer]  # 🎯 Enhanced smart deduplication + validation
+    messages: Annotated[Sequence[BaseMessage], lambda x, y: x + y]
+    #messages: Annotated[Sequence[BaseMessage], smart_message_reducer]  # 🎯 Enhanced smart deduplication + validation
     cliente_id: str                                    # Unique identifier for the user
     
     # Contextual information
