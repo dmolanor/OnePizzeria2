@@ -16,7 +16,7 @@ class Handles:
         self.prompts = CustomerServicePrompts()
         pass
     
-    def _get_next_incomplete_state(self, order_states: Dict[str, int], order_items: List) -> str:
+    def _get_next_incomplete_state(self, order_steps: Dict[str, int], order_items: List) -> str:
         """Determine the next incomplete state that needs to be addressed."""
         # Define the order of required states
         required_states = [
@@ -29,11 +29,11 @@ class Handles:
             "finalizacion"
         ]
         
-        print(f"🔍 Checking states for next incomplete: {order_states}")
+        print(f"🔍 Checking states for next incomplete: {order_steps}")
         print(f"📦 Order items count: {len(order_items) if order_items else 0}")
         
         for state_name in required_states:
-            current_value = order_states.get(state_name, 0)
+            current_value = order_steps.get(state_name, 0)
             print(f"  - {state_name}: {current_value}")
             
             if current_value != 2:  # Not completed
@@ -48,7 +48,7 @@ class Handles:
                 elif state_name == "seleccion_productos":
                     if len(order_items) == 0:
                         # If no order created yet, need to create order first
-                        if order_states.get("crear_pedido", 0) != 2:
+                        if order_steps.get("crear_pedido", 0) != 2:
                             print(f"🎯 Next state: crear_pedido (needed before selecting products)")
                             return "crear_pedido"
                         else:
@@ -59,7 +59,7 @@ class Handles:
                         print(f"✅ {state_name} should be completed (has {len(order_items)} products)")
                         continue
                 elif state_name == "confirmacion":
-                    if len(order_items) > 0 and order_states.get("seleccion_productos", 0) == 2:
+                    if len(order_items) > 0 and order_steps.get("seleccion_productos", 0) == 2:
                         print(f"🎯 Next state: {state_name} (ready for confirmation)")
                         return state_name
                     else:
@@ -71,7 +71,7 @@ class Handles:
         print("✅ All states completed")
         return None  # All states completed
     
-    def _get_next_step_guidance(self, next_state: str, order_states: Dict[str, int], order_items: List) -> str:
+    def _get_next_step_guidance(self, next_state: str, order_steps: Dict[str, int], order_items: List) -> str:
         """Get guidance message for the next step in the order process."""
         guidance_map = {
             "saludo": "PRÓXIMO PASO: Saluda cordialmente al cliente si aún no lo has hecho.",
@@ -94,11 +94,11 @@ class Handles:
     # SIN USAR
     def _mark_state_completed(self, state: Dict[str, Any], intent: str) -> Dict[str, Any]:
         """Mark a specific intent state as completed (2)."""
-        order_states = state.get("order_states", {})
-        if intent in order_states:
-            order_states[intent] = 2
+        order_steps = state.get("order_steps", {})
+        if intent in order_steps:
+            order_steps[intent] = 2
             print(f"Marked {intent} as completed (2)")
-        return order_states
+        return order_steps
     
     def _build_conversation_context(self, state: Dict[str, Any]) -> list:
         """Build conversation context for LLM."""

@@ -2,6 +2,7 @@ from contextlib import nullcontext
 import os
 
 from langchain_core.tools import tool
+from pydantic.v1.errors import NoneIsAllowedError
 
 from config import supabase
 
@@ -53,7 +54,7 @@ def get_active_order_by_client(cliente_id: str) -> dict:
     except Exception as e:
         return {"error": f"Error al buscar pedido activo: {str(e)}"}
 @tool
-def create_order(cliente_id: str, items: list = None, total: float = 0.0, direccion_entrega: str = NULL, estado: str = "PREPARANDO") -> dict:
+def create_order(cliente_id: str, items: list = None, total: float = 0.0, direccion_entrega: str = None, estado: str = "PREPARANDO") -> dict:
     """
     Crea un nuevo pedido activo.
     
@@ -214,43 +215,6 @@ def get_client_by_id(cliente_id: str) -> dict:
     except Exception as e:
         return {"error": f"Error al buscar cliente: {str(e)}"}
 
-
-
-@tool
-def create_client(id: str, nombre: str, apellido: str, telefono: str, direccion: str = None) -> dict:
-    """
-    Crea un nuevo cliente en la base de datos.
-    
-    Args:
-        id: ID del usuario de Telegram (string)
-        nombre: Nombre del cliente (string)
-        apellido: Apellido del cliente (string)
-        telefono: Número de teléfono (string)  
-        direccion: Dirección del cliente (string, opcional)
-        
-    Returns:
-        dict: Resultado de la operación
-        
-    Example:
-        create_client("7315133184", "Diego", "Molano", "3203782744", "Calle 127A #11B-76 Apto 401")
-    """
-    try:
-        
-        client_data = {
-            "id": id,
-            "nombre_completo": nombre + " " + apellido,
-            "nombre": nombre,
-            "apellido": apellido,
-            "telefono": telefono
-        }
-        
-        if direccion:
-            client_data["direccion"] = direccion
-        
-        result = supabase.table("clientes").insert(client_data).execute()
-        return {"success": "Cliente creado exitosamente", "data": result.data}
-    except Exception as e:
-        return {"error": f"Error al crear cliente: {str(e)}"}
 
 @tool  
 def update_client(id: str, nombre:str = None, apellido: str = None, telefono: str = None, correo:str = None, direccion: str = None) -> dict:
@@ -554,7 +518,7 @@ def get_border_by_name( name: str) -> dict:
 #-------------------- TELEGRAM TOOLS --------------------#
 #=========================================================#
 
-@tool
+#@tool
 def send_text_message(message: str, parse_mode: str = "HTML") -> dict:
     """
     Envía un mensaje de texto al usuario con formato opcional.
@@ -758,10 +722,10 @@ def send_pdf_document(file_path: str = None, caption: str = None) -> dict:
         return {"error": f"Error al enviar documento: {str(e)}"}
 
 # Actualizar las listas de herramientas
-CUSTOMER_TOOLS = [get_client_by_id, create_client, update_client]
+CUSTOMER_TOOLS = [get_client_by_id, update_client]
 ORDER_TOOLS = [get_order_by_id, get_active_order_by_client, create_order, update_order, delete_order, finish_order]  # Removed get_menu - only use search_menu and send_full_menu
 MENU_TOOLS = [get_pizza_by_name, get_beverage_by_name, get_adition_by_name, get_border_by_name, get_combo_by_name, get_combos, get_borders, get_beverages]
-TELEGRAM_TOOLS = [send_text_message, send_image_message, send_inline_keyboard, send_menu_message, send_order_summary, send_pdf_document]
+TELEGRAM_TOOLS = [send_image_message, send_inline_keyboard, send_menu_message, send_order_summary, send_pdf_document]
 
 # Complete tool list for the agent
 ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS + TELEGRAM_TOOLS

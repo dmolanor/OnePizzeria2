@@ -13,8 +13,8 @@ class CustomerServicePrompts:
             Analiza el mensaje del usuario considerando TODO el contexto anterior y clasifica su intención en una de las siguientes categorías:
             
             - **saludo**: Saludos iniciales, presentaciones ("Hola", "Buenos días", etc.)
-            - **registro_datos_personales**: Proporciona nombre completo y/o teléfono
-            - **registro_direccion**: Proporciona o confirma dirección de entrega
+            - **registro_datos_personales**: Si proporciona nombre completo y/o teléfono
+            - **registro_direccion**: Si proporciona o confirma dirección de entrega
             - **consulta_menu**: Solicitudes de menú completo ("Me gustaría ver el menú", "Que hay de pizzas?", "Que bebidas ofrecen", etc.)
             - **consulta_productos**: Consulta de productos específicos ("Cuanto cuesta la pizza de pepperoni?", "A cuanto la coca-cola?", etc.)
             - **crear_pedido**: Crea un pedido nuevo (si no hay pedido) dada la intención del usuario y lo crea en la base de datos de pedidos_activos
@@ -55,7 +55,7 @@ class CustomerServicePrompts:
             Si el mensaje tiene múltiples intenciones, sepáralas en diferentes diccionarios.
                             """
 
-    def message_splitting_user(self, messages, order_states=None, customer_info=None, active_order=None):
+    def message_splitting_user(self, messages, order_steps=None, customer_info=None, active_order=None):
         current_message = messages[-1].content if messages else ""
         
         # Build context from recent conversation
@@ -69,9 +69,9 @@ class CustomerServicePrompts:
         
         # Build current state context
         state_context = ""
-        if order_states:
-            completed_states = [state for state, value in order_states.items() if value == 2]
-            in_progress_states = [state for state, value in order_states.items() if value == 1]
+        if order_steps:
+            completed_states = [state for state, value in order_steps.items() if value == 2]
+            in_progress_states = [state for state, value in order_steps.items() if value == 1]
             
             if completed_states:
                 state_context += f"\nEstados ya completados: {', '.join(completed_states)}"
@@ -118,10 +118,6 @@ class CustomerServicePrompts:
         3. USA las herramientas con los argumentos CORRECTOS basados en la información del usuario
         
         MAPEO DE INTENTS A HERRAMIENTAS:
-        
-        Si es "crear_cliente":
-        - Usa create_client
-        - Argumentos: id="cliente_id"
         
         Si es "registro_datos_personales":
         - Extraer nombre, apellido y teléfono del action

@@ -246,8 +246,8 @@ class ChatState(TypedDict):
     """
     
     # Core conversation data - NOW WITH ENHANCED SMART REDUCER
-    #messages: Annotated[Sequence[BaseMessage], lambda x, y: x + y]
-    messages: Annotated[Sequence[BaseMessage], smart_message_reducer]  # 🎯 Enhanced smart deduplication + validation
+    messages: Annotated[Sequence[BaseMessage], lambda x, y: x + y]
+    #messages: Annotated[Sequence[BaseMessage], smart_message_reducer]  # 🎯 Enhanced smart deduplication + validation
     cliente_id: str                                    # Unique identifier for the user
     
     # Contextual information
@@ -261,18 +261,8 @@ class ChatState(TypedDict):
     active_order: Optional[Dict[str, Any]]          # Current order being processed
     
     # Order process states (0=not started, 1=in progress, 2=completed)
-    order_states: Optional[Dict[str, int]]          # Unified state tracking
+    order_steps: Optional[Dict[str, int]]          # Unified state tracking
     
-    # Legacy individual state fields (kept for compatibility)
-    saludo: Optional[int]
-    registro_datos_personales: Optional[int] 
-    registro_direccion: Optional[int]
-    consulta_menu: Optional[int]
-    crear_pedido: Optional[int]
-    seleccion_productos: Optional[int]
-    confirmacion: Optional[int]
-    finalizacion: Optional[int]
-    general: Optional[int]
 
     
 

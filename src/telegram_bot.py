@@ -180,8 +180,6 @@ class TelegramBot:
             # Process combined message through workflow
             initial_state = await state_manager.load_state_for_user(cliente_id, HumanMessage(combined_message))
             initial_state["messages"] += [HumanMessage(combined_message)]
-            print(f"initial state messages: {initial_state}")
-            logger.info(f"Initial state created: {initial_state}")
             
             logger.info("Starting workflow execution...")
             response_state = await self.workflow.workflow.ainvoke(initial_state)

@@ -106,7 +106,7 @@ class Workflow:
             print(f"User ID: {cliente_id}")
             
             # Get existing order states from previous state or initialize
-            existing_order_states = state.get("order_states", {
+            existing_order_steps = state.get("order_steps", {
                 "saludo": 0,
                 "registro_datos_personales": 0,
                 "registro_direccion": 0,
@@ -117,7 +117,7 @@ class Workflow:
                 "finalizacion": 0,
                 "general": 0
             })
-            print(f"Existing order states: {existing_order_states}")
+            print(f"Existing order states: {existing_order_steps}")
             
             # Check if user exists in database and update states accordingly
             try:
@@ -128,15 +128,16 @@ class Workflow:
                     
                     # Update states based on existing customer data
                     if customer.get("nombre_completo") and customer.get("telefono"):
-                        existing_order_states["registro_datos_personales"] = 2
+                        existing_order_steps["registro_datos_personales"] = 2
                         print("Set registro_datos_personales to completed (2)")
                     
                     if customer.get("direccion"):
-                        existing_order_states["registro_direccion"] = 2
+                        existing_order_steps["registro_direccion"] = 2
                         print("Set registro_direccion to completed (2)")
                 else:
-                    customer = None
-                    print("Customer not found in database")
+                    customer_result = supabase.table("clientes").insert({"id": cliente_id}).execute()
+                    customer = customer_result.data[0]
+                    print("Customer created in database")
             except Exception as e:
                 print(f"Error checking customer: {e}")
                 customer = None
@@ -149,7 +150,7 @@ class Workflow:
                 SystemMessage(content=self.prompts.MESSAGE_SPLITTING_SYSTEM),
                 HumanMessage(content=self.prompts.message_splitting_user(
                     messages=state["messages"],
-                    order_states=existing_order_states,
+                    order_steps=existing_order_steps,
                     customer_info=customer,
                     active_order=state.get("active_order", {})
                 ))
@@ -168,62 +169,61 @@ class Workflow:
                 raw = re.sub(r"^```(?:json)?\n?", "", raw)
                 raw = re.sub(r"\n?```$", "", raw)
             
-            print(f"Raw content after cleaning: {raw}")
-            
             try:
                 divided = json.loads(raw)
                 print(f"JSON parsed successfully: {divided}")
             except json.JSONDecodeError as json_err:
                 print(f"JSON parsing error: {json_err}")
                 print(f"Raw content was: {repr(raw)}")
-                return {"divided_message": [], "order_states": existing_order_states}
+                return {"divided_message": [], "order_steps": existing_order_steps}
             
             # Update states based on current message intents
             for i, section in enumerate(divided):
                 print(f"Processing section {i}: {section}")
                 intent = section.get("intent", "unknown")
-                if intent in existing_order_states:
+                if intent in existing_order_steps:
                     # Only set to 1 (in progress) if not already completed (2)
-                    if existing_order_states[intent] != 2:
-                        existing_order_states[intent] = 1
+                    if existing_order_steps[intent] != 2:
+                        existing_order_steps[intent] = 1
                         print(f"Set {intent} to in progress (1)")
                     else:
                         print(f"{intent} already completed (2), keeping status")
                         
                     # Mark saludo as completed immediately if detected
                     if intent == "saludo":
-                        existing_order_states["saludo"] = 2
+                        existing_order_steps["saludo"] = 2
                         print(f"Marked saludo as completed (2)")
                         
                     # Auto-trigger crear_pedido for product selection if no active order
                     elif intent == "seleccion_productos":
                         # Check if we need to create an order first
-                        if existing_order_states.get("crear_pedido", 0) == 0:
-                            existing_order_states["crear_pedido"] = 1
+                        if existing_order_steps.get("crear_pedido", 0) == 0:
+                            existing_order_steps["crear_pedido"] = 1
                             print(f"Auto-triggered crear_pedido for product selection")
                         
                 else:
-                    existing_order_states["general"] = 1
+                    existing_order_steps["general"] = 1
             
             result = {
                 "divided_message": divided,
-                "order_states": existing_order_states,
+                "order_steps": existing_order_steps,
                 "customer": customer,
                 "messages": [],
                 "active_order": state.get("active_order", {}),  # Preserve active_order
+                "customer": customer,
                 # Individual state fields for ChatState compatibility
-                "saludo": existing_order_states.get("saludo", 0),
-                "registro_datos_personales": existing_order_states.get("registro_datos_personales", 0),
-                "registro_direccion": existing_order_states.get("registro_direccion", 0),
-                "consulta_menu": existing_order_states.get("consulta_menu", 0),
-                "crear_pedido": existing_order_states.get("crear_pedido", 0),
-                "seleccion_productos": existing_order_states.get("seleccion_productos", 0),
-                "confirmacion": existing_order_states.get("confirmacion", 0),
-                "finalizacion": existing_order_states.get("finalizacion", 0),
-                "general": existing_order_states.get("general", 0)
+                "saludo": existing_order_steps.get("saludo", 0),
+                "registro_datos_personales": existing_order_steps.get("registro_datos_personales", 0),
+                "registro_direccion": existing_order_steps.get("registro_direccion", 0),
+                "consulta_menu": existing_order_steps.get("consulta_menu", 0),
+                "crear_pedido": existing_order_steps.get("crear_pedido", 0),
+                "seleccion_productos": existing_order_steps.get("seleccion_productos", 0),
+                "confirmacion": existing_order_steps.get("confirmacion", 0),
+                "finalizacion": existing_order_steps.get("finalizacion", 0),
+                "general": existing_order_steps.get("general", 0)
             }
             print(f"=== DETECT_USER_INTENT_STEP END ===")
-            print(f"Returning order_states: {existing_order_states}")
+            print(f"Returning order_steps: {existing_order_steps}")
             return result
             
         except Exception as e:
@@ -231,10 +231,10 @@ class Workflow:
             print(f"ERROR in detect_user_intent_step: {e}")
             print(f"Full traceback:\n{traceback.format_exc()}")
             # Return existing states to avoid reset
-            existing_states = state.get("order_states", {})
+            existing_states = state.get("order_steps", {})
             return {
                 "divided_message": [], 
-                "order_states": existing_states,
+                "order_steps": existing_states,
                 "active_order": state.get("active_order", {}),  # Preserve active_order
                 # Individual state fields for ChatState compatibility
                 "saludo": existing_states.get("saludo", 0),
@@ -259,10 +259,11 @@ class Workflow:
             return {"divided_message": []}
         
         # Get current section to process
+        i = len(state["divided_message"])
         section = state["divided_message"].pop()
         cliente_id = state.get("cliente_id", "")
         
-        print(f"Processing section: {section}")
+        print(f"Processing section {i}: {section}")
         print(f"User ID: {cliente_id}")
         
         # Get existing order from state or create new one
@@ -354,11 +355,11 @@ class Workflow:
                         print(f"🍕 Searching for product: {tool_call['args']}")
             else:
                 print("⚠️ No tools called for product selection")
-        else:
+        else:   
             print(f"Sending enhanced prompt to LLM with tools...")
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
             
-            print(f"Response retrieve_data_step: {response}")
+            print(f"Response retrieve_data_step: {response.additional_kwargs['function']}")
             updated_state = {"messages": list(state["messages"]) + [response]}
             
             # Check for tool calls
@@ -381,9 +382,9 @@ class Workflow:
         # Preserve active_order in state
         updated_state["active_order"] = active_order
         
-        # Also preserve order_states if they exist
-        if "order_states" in state:
-            updated_state["order_states"] = state["order_states"]
+        # Also preserve order_steps if they exist
+        if "order_steps" in state:
+            updated_state["order_steps"] = state["order_steps"]
         
         return updated_state
     
@@ -405,8 +406,8 @@ class Workflow:
             "order_items": []
         })
         
-        # Get existing order_states and preserve them
-        order_states = state.get("order_states", {
+        # Get existing order_steps and preserve them
+        order_steps = state.get("order_steps", {
             "saludo": 0,
             "registro_datos_personales": 0,
             "registro_direccion": 0,
@@ -417,14 +418,15 @@ class Workflow:
             "finalizacion": 0,
             "general": 0
         })
+    
         
         order_items, order_total = [], 0
-        if active_order:
-            order_items = active_order.get("order_items", [])
-            order_total = active_order.get("order_total", 0)
+        if active_order_data:
+            order_items = active_order_data.get("order_items", [])
+            order_total = active_order_data.get("order_total", 0)
         
         print(f"Current order state: {len(order_items)} items, total: ${order_total}")
-        print(f"Current order_states: {order_states}")
+        print(f"Current order_steps: {order_steps}")
         
         # Track actions completed in this step
         products_added = False
@@ -433,6 +435,7 @@ class Workflow:
         order_finalized = False
         
         # Look for ToolMessage in recent messages
+        print(f"Last 5 messages: {reversed(messages[-5:])}")
         for message in reversed(messages[-5:]):  # Check last 5 messages
             if isinstance(message, ToolMessage):
                 print(f"🔧 Processing ToolMessage: {message.tool_call_id}")
@@ -454,7 +457,7 @@ class Workflow:
                         # Order creation
                         if "Pedido creado exitosamente" in success_msg:
                             order_created = True
-                            order_states["crear_pedido"] = 2
+                            order_steps["crear_pedido"] = 2
                             print("✅ Order created - marking crear_pedido as completed (2)")
                             
                         # Order update
@@ -465,7 +468,7 @@ class Workflow:
                         # Order finalization
                         elif "Pedido finalizado exitosamente" in success_msg:
                             order_finalized = True
-                            order_states["finalizacion"] = 2
+                            order_steps["finalizacion"] = 2
                             print("✅ Order finalized - marking finalizacion as completed (2)")
                             # Clear active order since it's been finalized
                             active_order_data = {
@@ -478,7 +481,7 @@ class Workflow:
                         # Client operations
                         elif "Cliente" in success_msg:
                             if "creado" in success_msg or "actualizado" in success_msg:
-                                order_states["registro_datos_personales"] = 2
+                                order_steps["registro_datos_personales"] = 2
                                 print("✅ Client data updated - marking registro_datos_personales as completed (2)")
                     
                     # Handle product search results (pizza or beverage found)
@@ -591,31 +594,39 @@ class Workflow:
                 except (json.JSONDecodeError, KeyError) as e:
                     print(f"Error processing tool result: {e}")
         
-        # Update order_states based on successful actions
+        # Update order_steps based on successful actions
         if products_added:
-            order_states["seleccion_productos"] = 2  # Mark as completed
+            order_steps["seleccion_productos"] = 2  # Mark as completed
             print("✅ Products added - marking seleccion_productos as completed (2)")
             
         return {
-            "active_order": active_order,
-            "order_states": order_states,
+            "active_order": active_order_data,
+            "order_steps": order_steps,
             # Individual state fields for ChatState compatibility
-            "saludo": order_states.get("saludo", 0),
-            "registro_datos_personales": order_states.get("registro_datos_personales", 0),
-            "registro_direccion": order_states.get("registro_direccion", 0),
-            "consulta_menu": order_states.get("consulta_menu", 0),
-            "crear_pedido": order_states.get("crear_pedido", 0),
-            "seleccion_productos": order_states.get("seleccion_productos", 0),
-            "confirmacion": order_states.get("confirmacion", 0),
-            "finalizacion": order_states.get("finalizacion", 0),
-            "general": order_states.get("general", 0)
+            "saludo": order_steps.get("saludo", 0),
+            "registro_datos_personales": order_steps.get("registro_datos_personales", 0),
+            "registro_direccion": order_steps.get("registro_direccion", 0),
+            "consulta_menu": order_steps.get("consulta_menu", 0),
+            "crear_pedido": order_steps.get("crear_pedido", 0),
+            "seleccion_productos": order_steps.get("seleccion_productos", 0),
+            "confirmacion": order_steps.get("confirmacion", 0),
+            "finalizacion": order_steps.get("finalizacion", 0),
+            "general": order_steps.get("general", 0)
         }
     
     
     async def send_response_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Generate and format response to user."""
-        cliente_id = state["cliente_id"]
-        new_message = state["messages"][-1] if state["messages"] else None
+        
+        # Recupera el id de cliente y el último mensaje del state
+        for msg in reversed(state["messages"]):
+            if isinstance(msg, HumanMessage):
+                new_message = msg
+                break
+            else:
+                new_message = None
+        
+        print(f"Último mensaje: {new_message}")
         
         if new_message:
             user_input = new_message.content
@@ -623,7 +634,7 @@ class Workflow:
             user_input = ""
         
         # Get existing order states (preserve from previous steps)
-        order_states = state.get("order_states", {
+        order_steps = state.get("order_steps", {
             "saludo": 0,
             "registro_datos_personales": 0,
             "registro_direccion": 0,
@@ -645,59 +656,13 @@ class Workflow:
         
         messages = state.get("messages", [])
         
-        # Look for successful tool executions in recent messages and update states
-        for message in reversed(messages[-10:]):  # Check last 10 messages
-            # Check ToolMessage specifically for tool results
-            if isinstance(message, ToolMessage):
-                try:
-                    import json
-                    tool_result = json.loads(message.content)
-                    if "success" in tool_result:
-                        content = tool_result["success"].lower()
-                        print(f"🔧 Processing ToolMessage success: {content}")
-                        if "cliente" in content:
-                            if "creado" in content or "actualizado" in content:
-                                order_states["registro_datos_personales"] = 2
-                                print("Marked registro_datos_personales as completed (2)")
-                                if "direccion" in content or "dirección" in content:
-                                    order_states["registro_direccion"] = 2
-                                    print("Marked registro_direccion as completed (2)")
-                        elif "pedido" in content:
-                            if "creado" in content:
-                                order_states["seleccion_productos"] = 2
-                                print("Marked seleccion_productos as completed (2)")
-                            elif "finalizado" in content:
-                                order_states["finalizacion"] = 2
-                                print("Marked finalizacion as completed (2)")
-                except (json.JSONDecodeError, KeyError):
-                    pass
-            # Also check AIMessage content for backwards compatibility
-            elif isinstance(message, AIMessage) and hasattr(message, "content") and isinstance(message.content, str):
-                content = message.content.lower()
-                if "exitosamente" in content or "success" in content:
-                    # Try to determine which state was completed based on content
-                    if "cliente" in content:
-                        if "creado" in content or "actualizado" in content:
-                            order_states["registro_datos_personales"] = 2
-                            print("Marked registro_datos_personales as completed (2)")
-                            if "direccion" in content or "dirección" in content:
-                                order_states["registro_direccion"] = 2
-                                print("Marked registro_direccion as completed (2)")
-                    elif "pedido" in content:
-                        if "creado" in content:
-                            order_states["seleccion_productos"] = 2
-                            print("Marked seleccion_productos as completed (2)")
-                        elif "finalizado" in content:
-                            order_states["finalizacion"] = 2
-                            print("Marked finalizacion as completed (2)")
-        
         # Mark saludo as completed if it was detected but not yet marked
-        if order_states.get("saludo", 0) == 1:
-            order_states["saludo"] = 2
+        if order_steps.get("saludo", 0) == 1:
+            order_steps["saludo"] = 2
             print("Marking saludo as completed (2) in send_response_step")
         
         # Determine the next incomplete state to progress to
-        next_incomplete_state = self.handles._get_next_incomplete_state(order_states, order_items)
+        next_incomplete_state = self.handles._get_next_incomplete_state(order_steps, order_items)
         
         # Build context based on current state and next action needed
         context = self.handles._build_conversation_context(state)
@@ -720,7 +685,7 @@ class Workflow:
         if next_incomplete_state:
             context.append(
                 SystemMessage(
-                    content=self.handles._get_next_step_guidance(next_incomplete_state, order_states, order_items)
+                    content=self.handles._get_next_step_guidance(next_incomplete_state, order_steps, order_items)
                 )
             )
         else:
@@ -735,7 +700,7 @@ class Workflow:
         response = await self.llm.ainvoke(context)
         
         print(f"Response: {response.content}")
-        print(f"Final order states: {order_states}")
+        print(f"Final order states: {order_steps}")
         print(f"Next incomplete state: {next_incomplete_state}")
         
         # NOTE: Memory saving moved to dedicated final node
@@ -745,18 +710,18 @@ class Workflow:
         
         return {
             "messages": all_messages,  # 📝 Todos los mensajes preservados
-            "order_states": order_states,  # Preserve states
+            "order_steps": order_steps,  # Preserve states
             "active_order": active_order,   # Preserve active order
             # Individual state fields for ChatState compatibility
-            "saludo": order_states.get("saludo", 0),
-            "registro_datos_personales": order_states.get("registro_datos_personales", 0),
-            "registro_direccion": order_states.get("registro_direccion", 0),
-            "consulta_menu": order_states.get("consulta_menu", 0),
-            "crear_pedido": order_states.get("crear_pedido", 0),
-            "seleccion_productos": order_states.get("seleccion_productos", 0),
-            "confirmacion": order_states.get("confirmacion", 0),
-            "finalizacion": order_states.get("finalizacion", 0),
-            "general": order_states.get("general", 0)
+            "saludo": order_steps.get("saludo", 0),
+            "registro_datos_personales": order_steps.get("registro_datos_personales", 0),
+            "registro_direccion": order_steps.get("registro_direccion", 0),
+            "consulta_menu": order_steps.get("consulta_menu", 0),
+            "crear_pedido": order_steps.get("crear_pedido", 0),
+            "seleccion_productos": order_steps.get("seleccion_productos", 0),
+            "confirmacion": order_steps.get("confirmacion", 0),
+            "finalizacion": order_steps.get("finalizacion", 0),
+            "general": order_steps.get("general", 0)
         }
         
     async def save_memory_step(self, state: Dict[str, Any]) -> Dict[str, Any]:

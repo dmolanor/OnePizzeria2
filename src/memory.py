@@ -265,10 +265,10 @@ class MemoryManager:
             
             try:
                 # Clear order states cache if separate table exists  
-                result3 = supabase.table("order_states_cache").delete().eq("cliente_id", cliente_id).execute()
+                result3 = supabase.table("order_steps_cache").delete().eq("cliente_id", cliente_id).execute()
                 logger.info(f"   ✅ Order states cache cleared: {len(result3.data) if result3.data else 0} records")
             except Exception as e:
-                logger.info(f"   ℹ️  No order_states_cache table or already clean: {e}")
+                logger.info(f"   ℹ️  No order_steps_cache table or already clean: {e}")
             
             # 3. Clear from memory cache
             if cliente_id in self._cache:
@@ -299,7 +299,7 @@ class MemoryManager:
             results["conversations"] = len(result1.data) if result1.data else 0
             
             # Clear other cache tables
-            for table_name in ["customer_cache", "order_states_cache"]:
+            for table_name in ["customer_cache", "order_steps_cache"]:
                 try:
                     result = supabase.table(table_name).delete().neq("id", "impossible_id").execute()
                     results[table_name] = len(result.data) if result.data else 0

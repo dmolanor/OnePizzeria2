@@ -62,7 +62,7 @@ model = ChatOpenAI(
 def agente_divisor(state: ChatState) -> Dict[str, Any]:
     print(f"Dividing message and identifying intent: {state["messages"]}")
     
-    existing_order_states = {
+    existing_order_steps = {
                 "saludo": 0,
                 "registro_datos_personales": 0,
                 "registro_direccion": 0,
@@ -80,7 +80,7 @@ def agente_divisor(state: ChatState) -> Dict[str, Any]:
                 SystemMessage(content=CustomerServicePrompts.MESSAGE_SPLITTING_SYSTEM),
                 HumanMessage(content=CustomerServicePrompts.message_splitting_user(
                     messages=complete_state["messages"],
-                    order_states=existing_order_states,
+                    order_steps=existing_order_steps,
                     active_order=state.get("active_order", {})
                 ))
             ]
