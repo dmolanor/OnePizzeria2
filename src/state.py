@@ -14,6 +14,7 @@ class ProductDetails(BaseModel):
     product_id: str
     product_name:str
     product_type: str
+    tamaño: str
     borde: Dict[str, Any] = {}
     adiciones: List[Dict[str, Any]] = []
     base_price: float = 0.0
