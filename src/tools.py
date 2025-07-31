@@ -10,49 +10,24 @@ from config import supabase
 #=========================================================#
 
 @tool
-def get_order_by_id(id: int) -> dict:
+def get_order_by_id(cliente_id: str) -> dict:
     """
     Obtiene un pedido activo por su ID.
     
     Args:
-        id: ID numérico del pedido
+        cliente_id: ID numérico del pedido
         
     Returns:
         dict: Datos del pedido si existe
     """
     try:
-        result = supabase.table("pedidos_activos").select("*").eq("id", id).execute()
+        result = supabase.table("pedidos_activos").select("*").eq("cliente_id", cliente_id).execute()
         if result.data:
             return {"success": "Pedido encontrado", "data": result.data[0]}
         else:
-            return {"error": f"Pedido con ID {id} no encontrado"}
+            return {"fail": f"Pedido con ID {cliente_id} no encontrado"}
     except Exception as e:
         return {"error": f"Error al buscar pedido: {str(e)}"}
-
-
-@tool
-def get_active_order_by_client(cliente_id: str) -> dict:
-    """
-    Obtiene el pedido activo de un cliente específico.
-    
-    Args:
-        cliente_id: ID del cliente (string)
-        
-    Returns:
-        dict: Datos del pedido activo si existe, o error si no hay pedido activo
-        
-    Example:
-        get_active_order_by_client("7315133184")
-    """
-    try:
-        result = supabase.table("pedidos_activos").select("*").eq("cliente_id", cliente_id).execute()
-        if result.data:
-            return result.data[0]  # Retorna el primer pedido activo encontrado
-        else:
-            return {"error": f"No hay pedido activo para el cliente {cliente_id}"}
-    except Exception as e:
-        return {"error": f"Error al buscar pedido activo: {str(e)}"}
-    
     
 @tool
 def create_order(cliente_id: str, items: list = None, total: float = 0.0, direccion_entrega: str = None, estado: str = "PREPARANDO") -> dict:
@@ -94,14 +69,12 @@ def create_order(cliente_id: str, items: list = None, total: float = 0.0, direcc
     
     
 @tool
-def update_order(id: int, items: list = None, total: float = None, direccion_entrega: str = None, metodo_pago: str = None, estado: str = None) -> dict:
+def update_order_info(id: int, direccion_entrega: str = None, metodo_pago: str = None, estado: str = None) -> dict:
     """
     Actualiza un pedido activo existente.
     
     Args:
         id: ID del pedido a actualizar (int) - requerido
-        items: Lista de productos del pedido (opcional)
-        total: Total del pedido (float, opcional)
         direccion_entrega: Dirección de entrega (string, opcional)
         metodo_pago: Método de pago (string, opcional)
         estado: Estado del pedido (string, opcional)
@@ -128,15 +101,6 @@ def update_order(id: int, items: list = None, total: float = None, direccion_ent
         if estado is not None:
             update_data["estado"] = estado
             
-        # Actualizar datos del pedido (JSONB)
-        if items is not None or total is not None:
-            updated_pedido = current_pedido.copy()
-            if items is not None:
-                updated_pedido["items"] = items
-            if total is not None:
-                updated_pedido["total"] = total
-            update_data["pedido"] = updated_pedido
-            
         if not update_data:
             return {"error": "No se proporcionaron datos para actualizar"}
         
@@ -144,7 +108,7 @@ def update_order(id: int, items: list = None, total: float = None, direccion_ent
         return {"success": "Pedido actualizado exitosamente", "data": result.data}
     except Exception as e:
         return {"error": f"Error al actualizar pedido: {str(e)}"}
-    
+
     
 @tool
 def delete_order(id: int) -> dict:
@@ -188,15 +152,13 @@ def get_order_total(id: int, items: list = None) -> dict:
 
 
 @tool
-def add_product_to_order(cliente_id: str, product_data: dict, borde: dict = None, adiciones: list = None) -> dict:
+def add_products_to_order(cliente_id: str, product_data: dict) -> dict:
     """
     Agrega un producto estructurado al pedido activo de un cliente.
     
     Args:
         cliente_id: ID del cliente (string)
-        product_data: Datos del producto (debe incluir: id, nombre, tipo, precio)
-        borde: Información del borde (opcional) - dict con nombre y precio_adicional
-        adiciones: Lista de adiciones (opcional) - list de dicts con nombre y precio_adicional
+        product_data: Lista de diccionarios con datos del producto (debe incluir: tipo_producto, nombre, tamaño (opcional))
         
     Returns:
         dict: Resultado de la operación
@@ -204,28 +166,27 @@ def add_product_to_order(cliente_id: str, product_data: dict, borde: dict = None
     Example:
         add_product_to_order(
             "7315133184",
-            {"id": "1", "nombre": "Pepperoni", "tipo": "pizza", "precio": 25000},
-            {"nombre": "pimentón", "precio_adicional": 2000},
-            [{"nombre": "queso extra", "precio_adicional": 5000}]
+            [{"tipo_producto": "pizza", "nombre": "pepperoni", "tamaño": "large", "borde": "pesto", "adiciones": []},
+             {"tipo_producto": "bebida", "nombre": "coca cola"}]
         )
     """
     try:
         from src.state import ProductDetails
 
         # Get or create active order
-        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
         
-        if "error" in active_order:
+        if "fail" in active_order or "error" in active_order:
             # Create new order if none exists
             create_result = create_order.invoke({"cliente_id": cliente_id, "items": [], "total": 0.0})
             if "error" in create_result:
                 return create_result
-            active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+            active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
             if "error" in active_order:
                 return {"error": "Failed to create or retrieve order"}
         
-        order_id = active_order["id"]
-        current_pedido = active_order.get("pedido", {})
+        order_id = active_order["data"]["id"]
+        current_pedido = active_order.data[0]["data"].get("products", {})
         current_items = current_pedido.get("items", [])
         
         # Create structured product using ProductDetails
@@ -315,7 +276,7 @@ def remove_product_from_order(cliente_id: str, product_id: str) -> dict:
     """
     try:
         # Get active order
-        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
         
         if "error" in active_order:
             return {"error": "No hay pedido activo para este cliente"}
@@ -379,7 +340,7 @@ def update_product_in_order(cliente_id: str, product_id: str, new_borde: dict = 
     """
     try:
         # Get active order
-        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
         
         if "error" in active_order:
             return {"error": "No hay pedido activo para este cliente"}
@@ -481,7 +442,7 @@ def calculate_order_total(cliente_id: str) -> dict:
     """
     try:
         # Get active order
-        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
         
         if "error" in active_order:
             return {"error": "No hay pedido activo para este cliente"}
@@ -533,7 +494,7 @@ def get_order_details(cliente_id: str) -> dict:
     """
     try:
         # Get active order
-        active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+        active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
         
         if "error" in active_order:
             return {"error": "No hay pedido activo para este cliente"}
@@ -629,12 +590,12 @@ def finish_order(cliente_id: str) -> dict:
 
 
 @tool
-def get_client_by_id(user_id: str) -> dict:
+def get_client_by_id(cliente_id: str) -> dict:
     """
     Retorna la información de un cliente a partir de su ID de Telegram.
     
     Args:
-        user_id: El ID del usuario de Telegram (como string)
+        cliente_id: El ID del usuario de Telegram (como string)
         
     Returns:
         dict: Los datos del cliente si existe
@@ -643,11 +604,11 @@ def get_client_by_id(user_id: str) -> dict:
         get_client_by_id("7315133184")
     """
     try:
-        result = supabase.table("clientes").select("*").eq("id", user_id).execute()
+        result = supabase.table("clientes").select("*").eq("id", cliente_id).execute()
         if result.data:
             return result.data[0]
         else:
-            return {"error": f"Cliente con ID {user_id} no encontrado"}
+            return {"error": f"Cliente con ID {cliente_id} no encontrado"}
     except Exception as e:
         return {"error": f"Error al buscar cliente: {str(e)}"}
 
@@ -1348,8 +1309,8 @@ def send_pdf_document(file_path: str = None, caption: str = None) -> dict:
         return {"error": f"Error al enviar documento: {str(e)}"}
 
 # Actualizar las listas de herramientas
-CUSTOMER_TOOLS = [get_client_by_id, create_client, update_client]
-ORDER_TOOLS = [get_order_by_id, get_active_order_by_client, create_order, update_order, delete_order, get_order_total, finish_order]
+CUSTOMER_TOOLS = [get_client_by_id, update_client]
+ORDER_TOOLS = [create_order, update_order, delete_order, get_order_total, finish_order]
 PRODUCT_ORDER_TOOLS = [add_product_to_order, remove_product_from_order, update_product_in_order, calculate_order_total, get_order_details]
 SMART_PRODUCT_TOOLS = [add_product_to_order_smart, update_product_in_order_smart, get_border_price_by_name, get_adition_price_by_name]
 MENU_TOOLS = [get_pizza_by_name, get_beverage_by_name, get_adition_by_name, get_border_by_name, get_combo_by_name, get_combos, get_borders, get_beverages]

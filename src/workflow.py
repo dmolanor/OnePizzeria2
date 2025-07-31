@@ -14,7 +14,7 @@ from src.handles import Handles
 from src.prompts import CustomerServicePrompts
 from src.state import ChatState, Order, ProductDetails
 from src.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS, ORDER_TOOLS,
-                       TELEGRAM_TOOLS)
+                       TELEGRAM_TOOLS, get_order_by_id)
 
 
 class Workflow:
@@ -284,65 +284,41 @@ class Workflow:
         ]
         
         # Handle different intent types
+        
+        #===CONFIRMACION===#
         if section["intent"] == "confirmacion":
+            
             print("🔄 Detected confirmation intent - handling order confirmation")
             confirmation_result = await self.handles._handle_order_confirmation(state, section)
             updated_state = {"messages": confirmation_result["messages"]}
+            
+        #===CREAR PEDIDO===#    
         elif section["intent"] == "crear_pedido":
             
-            if state["customer"]:
-                print("🔄 Detected crear_pedido intent - ensuring order exists in database")
-                response = await self.llm.bind_tools(ORDER_TOOLS).ainvoke(context)
-                updated_state = {"messages": [response]}
+            order_response = get_order_by_id.invoke({"cliente_id": cliente_id})
             
-                # Log tool usage for order creation
-                if hasattr(response, "tool_calls") and response.tool_calls:
-                    print(f"🔧 CREATING ORDER: {[tc['name'] for tc in response.tool_calls]}")
-                    for tool_call in response.tool_calls:
-                        print(f"Order Creation Tool: {tool_call['name']}, Args: {tool_call['args']}")
-            else:
-                section = {"intent": "crear_cliente", "action": "Crear nuevo cliente con solo user_id"}
-                context = [
-                    SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-                    HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("order_items", []), section))
-                ]
-                print("Detected crear_cliente intent - creating new client in database")
-                response = await self.llm.bind_tools(CUSTOMER_TOOLS).ainvoke(context)
-                updated_state = {"messages": [response]}
-            
-                # Log tool usage for order creation
-                if hasattr(response, "tool_calls") and response.tool_calls:
-                    print(f"🔧 CREATING CLIENT: {[tc['name'] for tc in response.tool_calls]}")
-                    for tool_call in response.tool_calls:
-                        print(f"Client Creation Tool: {tool_call['name']}, Args: {tool_call['args']}")
+            if hasattr(order_response, "success"):
+                print("🔄 Detected crear_pedido intent - order already exists in database")
+                updated_state = {"active_order": order_response}
+                
+            elif hasattr(order_response, "fail"):
+                print("🔄 Detected crear_pedido intent - order does not exist in database - creating new order in database")
+                
+                active_order = supabase.table("pedidos_activos").insert({"cliente_id": cliente_id, "items": [], "total": 0.0}).execute()
+                updated_state = {"active_order": active_order.data[0]}
+                        
+        #===SELECCION DE PRODUCTOS===#
         elif section["intent"] == "seleccion_productos":
             print("🔄 Detected seleccion_productos intent - searching for products and managing order")
             
             # Enhanced prompt specifically for product selection
-            product_selection_prompt = f"""
-            SELECCIÓN DE PRODUCTOS - USUARIO: {cliente_id}
-            
-            ACCIÓN DEL USUARIO: {section["action"]}
-            
-            FLUJO OBLIGATORIO:
-            1. PRIMERO: Verificar si existe pedido activo con get_active_order_by_client({{"cliente_id": "{cliente_id}"}})
-            2. Si NO existe pedido: Crear pedido con create_order({{"cliente_id": "{cliente_id}", "items": [], "total": 0.0}})
-            3. LUEGO: Buscar el producto mencionado:
-               - Si menciona pizza: usa get_pizza_by_name con el nombre exacto
-               - Si menciona bebida: usa get_beverage_by_name con el nombre exacto
-            4. El producto se agregará automáticamente al pedido en el siguiente paso
-            
-            EXTRAE EL NOMBRE DEL PRODUCTO del action: {section["action"]}
-            
-            IMPORTANTE: Usa el nombre exacto del producto, no uses argumentos vacíos.
-            """
+            product_selection_prompt = self.prompts.tools_execution_system(section["intent"], section["action"])
             
             product_context = [
-                SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-                HumanMessage(content=product_selection_prompt)
+                SystemMessage(content=product_selection_prompt),
             ]
             
-            response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(product_context)
+            response = await self.llm.bind_tools(ORDER_TOOLS+MENU_TOOLS).ainvoke(product_context)
             updated_state = {"messages": [response]}
             
             # Log tool usage for product selection
@@ -354,6 +330,8 @@ class Workflow:
                         print(f"🍕 Searching for product: {tool_call['args']}")
             else:
                 print("⚠️ No tools called for product selection")
+                
+        #===PERSONALIZACION DE PRODUCTOS===#
         elif section["intent"] == "personalizacion_productos":
             print("🎨 Detected personalizacion_productos intent - handling product customizations")
             
@@ -392,6 +370,7 @@ class Workflow:
             else:
                 print("⚠️ No tools called for personalization")
                 
+        #===MODIFICACION DE PEDIDO===#
         elif section["intent"] == "modificar_pedido":
             print("✏️ Detected modificar_pedido intent - handling order modifications")
             
@@ -433,11 +412,13 @@ class Workflow:
                     print(f"Modification Tool: {tool_call['name']}, Args: {tool_call['args']}")
             else:
                 print("⚠️ No tools called for modification")
+                
+        #===GENERAL===#
         else:
             print(f"Sending enhanced prompt to LLM with tools...")
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
-            
-            print(f"Response retrieve_data_step: {response.additional_kwargs['function']}")
+            if response.additional_kwargs:
+                print(f"Response retrieve_data_step: {response.additional_kwargs['function']}")
             updated_state = {"messages": list(state["messages"]) + [response]}
             
             # Check for tool calls
