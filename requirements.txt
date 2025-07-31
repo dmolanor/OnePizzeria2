@@ -1,0 +1,50 @@
+# One Pizzeria Multi-Platform Bot - Dependencies
+
+# Core Framework and Async Support
+asyncio-mqtt>=0.13.0
+python-dotenv>=1.0.0
+
+# Telegram Bot
+python-telegram-bot>=20.0
+
+# WhatsApp Business API
+Flask>=2.3.0
+requests>=2.31.0
+requests-toolbelt>=1.0.0
+
+# AI and Language Models
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-groq>=0.1.0
+langchain-google-genai>=1.0.0
+langchain-openai>=0.1.0
+
+# Database and Storage
+supabase>=2.0.0
+
+# Location and Distance Services
+geopy>=2.4.0
+
+# Utilities and Data Processing
+python-dateutil>=2.8.0
+pydantic>=2.0.0
+
+# HTTP and Network
+httpx>=0.25.0
+urllib3>=2.0.0
+
+# Development and Testing (optional)
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Production Deployment (optional)
+gunicorn>=21.0.0
+uvicorn>=0.23.0
+
+# Monitoring and Logging (optional)
+structlog>=23.0.0
+prometheus-client>=0.17.0
