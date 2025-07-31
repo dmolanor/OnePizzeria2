@@ -4,9 +4,10 @@ Test script para verificar el flujo completo de pedidos
 """
 import asyncio
 
-from config import supabase
-from src.tools import (create_order, finish_order, get_active_order_by_client,
-                       get_client_by_id, update_order)
+from config.settings import supabase
+from src.services.tools import (create_order, finish_order,
+                                get_active_order_by_client, get_client_by_id,
+                                update_order)
 
 
 async def test_order_flow():

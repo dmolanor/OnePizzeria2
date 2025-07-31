@@ -8,13 +8,13 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
-from config import supabase
-from src.checkpointer import state_manager
-from src.handles import Handles
-from src.prompts import CustomerServicePrompts
-from src.state import ChatState, Order, ProductDetails
-from src.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS, ORDER_TOOLS,
-                       TELEGRAM_TOOLS, get_order_by_id)
+from config.settings import supabase
+from src.core.actions import Handles
+from src.core.checkpointer import state_manager
+from src.core.prompts import CustomerServicePrompts
+from src.core.state import ChatState, Order, ProductDetails
+from src.services.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS,
+                                ORDER_TOOLS, TELEGRAM_TOOLS, get_order_by_id)
 
 
 class Workflow:
@@ -549,7 +549,8 @@ class Workflow:
                         
                         # Use the new smart product tool instead of manual sync
                         try:
-                            from src.tools import add_product_to_order_smart
+                            from src.services.tools import \
+                                add_product_to_order_smart
 
                             # Extract product data
                             product_data = {
@@ -574,7 +575,7 @@ class Workflow:
                             if "success" in add_result:
                                 products_added = True
                                 # Update local active_order from database to keep state in sync
-                                from src.tools import \
+                                from src.services.tools import \
                                     get_active_order_by_client
                                 updated_order = get_active_order_by_client(cliente_id)
                                 if "error" not in updated_order:
@@ -740,7 +741,7 @@ class Workflow:
             print(f"   - Total messages to save: {len(messages)}")
             
             # 🔍 IDENTIFICAR MENSAJES NUEVOS QUE NO ESTÁN EN BD
-            from src.memory import memory
+            from src.core.memory import memory
 
             # Obtener conversación actual de la BD para comparar
             existing_context = await memory.get_conversation(cliente_id)

@@ -2,9 +2,10 @@
 """
 Test script para verificar solo las herramientas de pedidos
 """
-from config import supabase
-from src.tools import (create_order, finish_order, get_active_order_by_client,
-                       get_client_by_id, update_order)
+from config.settings import supabase
+from src.services.tools import (create_order, finish_order,
+                                get_active_order_by_client, get_client_by_id,
+                                update_order)
 
 
 def test_tools():

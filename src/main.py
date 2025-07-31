@@ -4,8 +4,9 @@ import logging
 import sys
 from typing import Optional
 
-from config import (TELEGRAM_BOT_TOKEN, WHATSAPP_ACCESS_TOKEN,
-                    WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_WEBHOOK_VERIFY_TOKEN)
+from config.settings import (TELEGRAM_BOT_TOKEN, WHATSAPP_ACCESS_TOKEN,
+                             WHATSAPP_PHONE_NUMBER_ID,
+                             WHATSAPP_WEBHOOK_VERIFY_TOKEN)
 
 # Configure logging
 logging.basicConfig(
@@ -24,7 +25,7 @@ def check_whatsapp_config() -> bool:
 
 def run_telegram_bot():
     """Run the Telegram bot."""
-    from src.telegram_bot import TelegramBot
+    from src.bots.telegram_bot import TelegramBot
     
     logger.info("🤖 Starting Telegram bot...")
     bot = TelegramBot(TELEGRAM_BOT_TOKEN)
@@ -32,7 +33,7 @@ def run_telegram_bot():
 
 def run_whatsapp_bot(host: str = "0.0.0.0", port: int = 5000, debug: bool = False):
     """Run the WhatsApp bot webhook server."""
-    from src.whatsapp_bot import WhatsAppBot
+    from src.bots.whatsapp_bot import WhatsAppBot
     
     logger.info("📱 Starting WhatsApp bot...")
     bot = WhatsAppBot()
@@ -40,8 +41,8 @@ def run_whatsapp_bot(host: str = "0.0.0.0", port: int = 5000, debug: bool = Fals
 
 async def run_both_bots(whatsapp_host: str = "0.0.0.0", whatsapp_port: int = 5000):
     """Run both Telegram and WhatsApp bots concurrently."""
-    from src.telegram_bot import TelegramBot
-    from src.whatsapp_bot import WhatsAppBot
+    from src.bots.telegram_bot import TelegramBot
+    from src.bots.whatsapp_bot import WhatsAppBot
     
     logger.info("🚀 Starting both Telegram and WhatsApp bots...")
     

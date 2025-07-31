@@ -1,17 +1,19 @@
-from typing import Annotated, Sequence, TypedDict, Dict, Any, Optional, List
-from dotenv import load_dotenv  
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
-from langchain_openai import ChatOpenAI
-from langchain_core.tools import tool
-from langgraph.graph.message import add_messages
-from langgraph.graph import StateGraph, END, START
-from langgraph.prebuilt import ToolNode
-from ..src.checkpointer import state_manager
-
-from ..src.prompts import CustomerServicePrompts
-
 import json
 import re
+from typing import Annotated, Any, Dict, List, Optional, Sequence, TypedDict
+
+from dotenv import load_dotenv
+from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
+                                     SystemMessage, ToolMessage)
+from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
+
+from ..src.core.checkpointer import state_manager
+from ..src.core.prompts import CustomerServicePrompts
+
 load_dotenv()
 
 class ChatState(TypedDict):

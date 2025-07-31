@@ -3,7 +3,7 @@ import os
 from langchain_core.tools import tool
 from pydantic.v1.errors import NoneIsAllowedError
 
-from config import supabase
+from config.settings import supabase
 
 #=========================================================#
 #---------------------- ORDER TOOLS ----------------------#
@@ -171,7 +171,7 @@ def add_products_to_order(cliente_id: str, product_data: dict) -> dict:
         )
     """
     try:
-        from src.state import ProductDetails
+        from src.core.state import ProductDetails
 
         # Get or create active order
         active_order = get_order_by_id.invoke({"cliente_id": cliente_id})

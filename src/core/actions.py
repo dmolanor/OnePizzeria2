@@ -3,12 +3,12 @@ from typing import Annotated, Any, Dict, List, Literal
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
                                      SystemMessage, ToolMessage)
 
-from config import supabase
-from src.checkpointer import state_manager
-from src.prompts import CustomerServicePrompts
-from src.state import ChatState, Order, ProductDetails
-from src.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS, ORDER_TOOLS,
-                       TELEGRAM_TOOLS)
+from config.settings import supabase
+from src.core.checkpointer import state_manager
+from src.core.prompts import CustomerServicePrompts
+from src.core.state import ChatState, Order, ProductDetails
+from src.services.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS,
+                                ORDER_TOOLS, TELEGRAM_TOOLS)
 
 
 class Handles:

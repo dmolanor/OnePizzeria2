@@ -19,7 +19,7 @@ def test_prompts_structure():
     print("=" * 60)
     
     try:
-        from src.prompts import CustomerServicePrompts
+        from src.core.prompts import CustomerServicePrompts
         prompts = CustomerServicePrompts()
         
         # Test que los prompts principales existen
@@ -56,7 +56,7 @@ def test_message_splitting_enhancements():
     print("=" * 60)
     
     try:
-        from src.prompts import CustomerServicePrompts
+        from src.core.prompts import CustomerServicePrompts
         prompts = CustomerServicePrompts()
         
         splitting_system = prompts.MESSAGE_SPLITTING_SYSTEM
@@ -92,7 +92,7 @@ def test_tools_execution_improvements():
     print("=" * 60)
     
     try:
-        from src.prompts import CustomerServicePrompts
+        from src.core.prompts import CustomerServicePrompts
         prompts = CustomerServicePrompts()
         
         tools_system = prompts.TOOLS_EXECUTION_SYSTEM
@@ -130,7 +130,7 @@ def test_specialized_prompts():
     print("=" * 60)
     
     try:
-        from src.prompts import CustomerServicePrompts
+        from src.core.prompts import CustomerServicePrompts
         prompts = CustomerServicePrompts()
         
         # Test personalization detection
@@ -176,7 +176,7 @@ def test_answer_system_optimization():
     print("=" * 60)
     
     try:
-        from src.prompts import CustomerServicePrompts
+        from src.core.prompts import CustomerServicePrompts
         prompts = CustomerServicePrompts()
         
         answer_system = prompts.ANSWER_SYSTEM
@@ -209,7 +209,7 @@ def test_context_methods():
     print("=" * 60)
     
     try:
-        from src.prompts import CustomerServicePrompts
+        from src.core.prompts import CustomerServicePrompts
         prompts = CustomerServicePrompts()
         
         # Test métodos principales

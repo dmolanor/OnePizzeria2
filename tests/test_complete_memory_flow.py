@@ -4,10 +4,13 @@ Test completo del flujo de memoria: carga y guardado
 """
 
 import asyncio
+
 from langchain_core.messages import HumanMessage
-from src.workflow import Workflow
-from src.memory import memory
-from config import supabase
+
+from config.settings import supabase
+from src.core.memory import memory
+from src.core.workflow import Workflow
+
 
 async def test_complete_memory_flow():
     """Prueba el flujo completo: carga desde DB -> procesamiento -> guardado en DB"""

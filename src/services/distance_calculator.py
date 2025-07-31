@@ -9,8 +9,8 @@ import requests
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import (LOCATIONIQ_TOKEN, RESTAURANT_LAT, RESTAURANT_LON, max_lat,
-                    max_lon, min_lat, min_lon, supabase)
+from config.settings import (LOCATIONIQ_TOKEN, RESTAURANT_LAT, RESTAURANT_LON,
+                             max_lat, max_lon, min_lat, min_lon, supabase)
 
 # --- Normalización de abreviaturas comunes en Colombia ---
 _ABBR = [

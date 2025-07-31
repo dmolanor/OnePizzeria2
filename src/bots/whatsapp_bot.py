@@ -9,9 +9,10 @@ from flask import Flask, jsonify, make_response, request
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from config import (WHATSAPP_ACCESS_TOKEN, WHATSAPP_API_URL,
-                    WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_WEBHOOK_VERIFY_TOKEN)
-from src.base_bot import BaseBot
+from config.settings import (WHATSAPP_ACCESS_TOKEN, WHATSAPP_API_URL,
+                             WHATSAPP_PHONE_NUMBER_ID,
+                             WHATSAPP_WEBHOOK_VERIFY_TOKEN)
+from src.bots.base_bot import BaseBot
 
 logger = logging.getLogger(__name__)
 

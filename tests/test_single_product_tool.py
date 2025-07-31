@@ -12,8 +12,8 @@ def main():
     print("=" * 40)
     
     try:
-        from config import supabase
-        from src.tools import add_product_to_order, get_client_by_id
+        from config.settings import supabase
+        from src.services.tools import add_product_to_order, get_client_by_id
 
         # Usar un usuario de test conocido
         test_user_id = "7315133184"

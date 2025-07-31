@@ -7,8 +7,8 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import supabase
-from src.tools import (  # Herramientas básicas de productos; Herramientas inteligentes; Herramientas base necesarias; Herramientas de menú
+from config.settings import supabase
+from src.services.tools import (  # Herramientas básicas de productos; Herramientas inteligentes; Herramientas base necesarias; Herramientas de menú
     add_product_to_order, add_product_to_order_smart, calculate_order_total,
     create_order, get_active_order_by_client, get_adition_price_by_name,
     get_beverage_by_name, get_border_price_by_name, get_client_by_id,

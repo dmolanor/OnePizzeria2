@@ -12,13 +12,13 @@ def main():
     print("=" * 40)
     
     try:
-        from src.tools import add_product_to_order
+        from src.services.tools import add_product_to_order
         print("✅ Successfully imported add_product_to_order")
         
-        from src.tools import get_order_details
+        from src.services.tools import get_order_details
         print("✅ Successfully imported get_order_details")
         
-        from config import supabase
+        from config.settings import supabase
         print("✅ Successfully imported supabase config")
         
         # Test basic functionality without database calls

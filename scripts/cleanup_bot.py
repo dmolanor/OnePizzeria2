@@ -23,8 +23,8 @@ from typing import Dict, List
 # Add src to path
 sys.path.append('src')
 
-from config import supabase
-from src.memory import memory
+from config.settings import supabase
+from src.core.memory import memory
 
 
 async def get_user_info(user_id: str) -> Dict:

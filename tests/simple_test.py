@@ -1,7 +1,7 @@
 print("Testing simple import...")
 
 try:
-    from src.tools import get_client_by_id
+    from src.services.tools import get_client_by_id
     print("✅ Import successful")
     
     result = get_client_by_id("7315133184")

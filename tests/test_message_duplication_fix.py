@@ -5,14 +5,16 @@ This simulates the workflow execution and checks for message duplication.
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 from langchain_core.messages import HumanMessage
-from src.workflow import Workflow
+
+from src.core.workflow import Workflow
+
 
 async def test_message_duplication():
     """Test that messages don't get duplicated in the workflow."""

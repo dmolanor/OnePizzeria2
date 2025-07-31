@@ -135,7 +135,7 @@ class ChatStateManager:
             
             # Get customer data from database
             try:
-                from .tools import get_client_by_id
+                from ..services.tools import get_client_by_id
                 customer = get_client_by_id.invoke({"cliente_id": cliente_id})
             except (ImportError, Exception) as e:
                 print(f"Warning: Could not get customer data: {e}")
@@ -143,7 +143,7 @@ class ChatStateManager:
             
             # Get active order if exists
             try:
-                from .tools import get_active_order_by_client
+                from ..services.tools import get_active_order_by_client
                 active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
             except (ImportError, Exception) as e:
                 print(f"Warning: Could not get active order: {e}")

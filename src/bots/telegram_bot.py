@@ -3,17 +3,17 @@ import json
 import logging
 import signal
 import sys
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage
 from telegram import BotCommand, Update
 from telegram.ext import (Application, CommandHandler, ContextTypes,
                           MessageHandler, filters)
 
-from src.memory import memory
-from src.state import ChatState
-from src.workflow import Workflow
-from src.checkpointer import state_manager
+from src.core.checkpointer import state_manager
+from src.core.memory import memory
+from src.core.state import ChatState
+from src.core.workflow import Workflow
 
 # Set higher logging level for httpx to avoid all GET and POST requests being logged
 logging.getLogger("httpx").setLevel(logging.WARNING)
