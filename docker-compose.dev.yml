@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  pizzeria-bot-dev:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: one-pizzeria-bot-dev
+    restart: "no"  # No restart en desarrollo
+    
+    # Variables de entorno para desarrollo
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+    
+    # Puertos - WhatsApp webhook
+    ports:
+      - "5000:5000"
+      - "8000:8000"  # Puerto para métricas si se implementa
+    
+    # Volúmenes para desarrollo - hot reload
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - ./logs:/app/logs
+    
+    # Comando para desarrollo con hot reload
+    command: ["python", "main.py", "--platform", "both", "--host", "0.0.0.0", "--port", "5000", "--debug"]
+    
+    # Health check más relajado para desarrollo
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 2
+      start_period: 30s
+    
+    # Sin límites de recursos en desarrollo
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 512M
+    
+    # Logging más verbose para desarrollo
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
+
+  # Base de datos local para desarrollo (opcional)
+  postgres-dev:
+    image: postgres:15
+    container_name: pizzeria-db-dev
+    restart: "no"
+    environment:
+      POSTGRES_DB: pizzeria_dev
+      POSTGRES_USER: dev_user
+      POSTGRES_PASSWORD: dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
+  # Redis para desarrollo (opcional)
+  redis-dev:
+    image: redis:7-alpine
+    container_name: pizzeria-cache-dev
+    restart: "no"
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_dev_data:
+    driver: local
+
+networks:
+  default:
+    name: pizzeria-network-dev

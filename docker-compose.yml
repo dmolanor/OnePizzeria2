@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  pizzeria-bot:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: one-pizzeria-bot
+    restart: unless-stopped
+    
+    # Variables de entorno (usar archivo .env)
+    env_file:
+      - .env
+    
+    # Puertos - solo necesario si usas WhatsApp
+    ports:
+      - "5000:5000"
+    
+    # Volúmenes para logs persistentes (opcional)
+    volumes:
+      - ./logs:/app/logs
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Limits de recursos (ajustar según necesidades)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Opcional: Base de datos local para desarrollo
+  # postgres:
+  #   image: postgres:15
+  #   container_name: pizzeria-db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: pizzeria
+  #     POSTGRES_USER: pizzeria_user
+  #     POSTGRES_PASSWORD: pizzeria_pass
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+  # Opcional: Redis para caché (para escalabilidad)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: pizzeria-cache
+  #   restart: unless-stopped
+  #   volumes:
+  #     - redis_data:/data
+  #   ports:
+  #     - "6379:6379"
+
+# Volúmenes persistentes
+volumes:
+  logs:
+    driver: local
+  # postgres_data:
+  # redis_data:
+
+# Red personalizada (opcional)
+networks:
+  default:
+    name: pizzeria-network

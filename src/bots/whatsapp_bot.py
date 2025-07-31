@@ -96,6 +96,30 @@ class WhatsAppBot(BaseBot):
                 "bot_type": "whatsapp",
                 "pending_messages": self.get_pending_messages_info()
             })
+        
+        @self.app.route("/health", methods=["GET"])
+        def health_check():
+            """Generic health check endpoint for Docker/K8s monitoring."""
+            try:
+                # Verificar conexión básica y configuración
+                if not all([self.access_token, self.phone_number_id]):
+                    return jsonify({
+                        "status": "unhealthy",
+                        "reason": "Missing configuration"
+                    }), 503
+                
+                return jsonify({
+                    "status": "healthy",
+                    "timestamp": time.time(),
+                    "bot_type": "whatsapp",
+                    "service": "one-pizzeria-bot"
+                }), 200
+            except Exception as e:
+                logger.error(f"Health check failed: {e}")
+                return jsonify({
+                    "status": "unhealthy",
+                    "reason": str(e)
+                }), 503
     
     def verify_webhook(self, request) -> Any:
         """
