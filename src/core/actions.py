@@ -11,7 +11,7 @@ from src.services.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS,
                                 ORDER_TOOLS, TELEGRAM_TOOLS)
 
 
-class Handles:
+class Actions:
     def __init__(self):
         self.prompts = CustomerServicePrompts()
         pass
@@ -104,7 +104,7 @@ class Handles:
         """Build conversation context for LLM."""
         context = []
         
-        context.append(SystemMessage(content=self.prompts.ANSWER_SYSTEM))
+        context.append(SystemMessage(content=self.prompts.answer_system()))
         cliente_id = state["cliente_id"]
         """
         context.append(
@@ -114,12 +114,6 @@ class Handles:
             )
         )
         """
-        if state.get("customer"):
-            context.append(
-                SystemMessage(
-                    content=f"Esta es la información actual del cliente: {state['customer']}"
-                )
-            )
         print("********************************************")
         print("********************************************")
         print("state['messages']")
@@ -293,45 +287,7 @@ class Handles:
                 "cliente_id": cliente_id,
                 "items": [],
                 "total": 0.0
-            }
-
-    async def _handle_order_confirmation(self, state: Dict[str, Any], section: Dict[str, str]) -> Dict[str, Any]:
-        """Handle order confirmation by creating order in database if products exist."""
-        cliente_id = state.get("cliente_id", "")
-        active_order = state.get("active_order", {})
-        
-        print(f"🔄 Handling order confirmation for user {cliente_id}")
-        print(f"📦 Active order has {len(active_order.get('order_items', []))} items")
-        
-        # Check if there are products to confirm
-        if not active_order.get("order_items"):
-            print("❌ No products in active order - cannot confirm")
-            return {"messages": []}
-        
-        # Validate and prepare order for creation
-        order_data = self._validate_and_prepare_order_for_creation(active_order, cliente_id)
-        
-        print(f"✅ Order validated - creating with {len(order_data['items'])} items, total: ${order_data['total']}")
-        
-        # Create enhanced prompt for order creation
-        confirmation_prompt = self.prompts.confirmation_user(order_data)
-        
-        # Create context and get LLM response
-        context = [
-            SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=confirmation_prompt)
-        ]
-        
-        response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
-        
-        if hasattr(response, "tool_calls") and response.tool_calls:
-            print(f"🔧 Creating order with tools: {[tc['name'] for tc in response.tool_calls]}")
-            for tool_call in response.tool_calls:
-                print(f"Tool: {tool_call['name']}, Args: {tool_call['args']}")
-        else:
-            print("⚠️ No tools called for order confirmation")
-        
-        return {"messages": [response]}
+            }  
 
     def _extract_product_customizations(self, user_message: str, product_type: str) -> Dict[str, Any]:
         """Extract product customizations (bordes, adiciones) from user message."""

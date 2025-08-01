@@ -1,7 +1,7 @@
 import json
 import re
-from typing import Annotated, Any, Dict, List, Literal
 from datetime import datetime
+from typing import Annotated, Any, Dict, List, Literal
 
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
                                      SystemMessage, ToolMessage)
@@ -10,7 +10,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from config.settings import supabase
-from src.core.actions import Handles
+from src.core.actions import Actions
 from src.core.checkpointer import state_manager
 from src.core.prompts import CustomerServicePrompts
 from src.core.state import ChatState, Order, ProductDetails
@@ -27,7 +27,7 @@ class Workflow:
         )
         self.prompts = CustomerServicePrompts()
         self.workflow = self._build_workflow()
-        self.handles = Handles()
+        self.actions = Actions()
     
     
     def _build_workflow(self):
@@ -285,24 +285,10 @@ class Workflow:
         
         productos_pedido = active_order.get("productos", [])
         
-        # Create context with enhanced instructions
-        context = [
-            SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, productos_pedido, section))
-        ]
-        
         # Handle different intent types
-        
-        #===CONFIRMACION===#
-        if section["intent"] == "confirmacion":
-            
-            print("🔄 Detected confirmation intent - handling order confirmation")
-            order_steps["seleccion_productos"] = 2
-            
-            updated_state = {"order_steps": order_steps}
 
         #===CREAR PEDIDO===#    
-        elif section["intent"] == "crear_pedido":
+        if section["intent"] == "crear_pedido":
             
             order_response = get_order_by_id.invoke({"cliente_id": cliente_id})
             
@@ -381,34 +367,10 @@ class Workflow:
         #===MODIFICACION DE PEDIDO===#
         elif section["intent"] == "modificar_pedido":
             print("✏️ Detected modificar_pedido intent - handling order modifications")
-            
-            modification_prompt = f"""
-            MODIFICACIÓN DE PEDIDO - USUARIO: {cliente_id}
-            
-            ACCIÓN DEL USUARIO: {section["action"]}
-            
-            CONTEXTO: El cliente quiere cambiar algo en su pedido actual.
-            
-            FLUJO:
-            1. PRIMERO: Obtener pedido actual con get_order_details({{"cliente_id": "{cliente_id}"}})
-            2. ANALIZAR: ¿Qué tipo de modificación quiere?
-               - Cambiar personalización: usar update_product_in_order_smart
-               - Remover producto: usar remove_product_from_order
-               - Agregar producto nuevo: usar add_product_to_order_smart
-            3. EXTRAER información específica del action: {section["action"]}
-            
-            TIPOS DE MODIFICACIÓN:
-            - "cambiar borde" → update_product_in_order_smart con new_borde_name
-            - "quitar producto" → remove_product_from_order
-            - "sin adición" → update_product_in_order_smart con new_adiciones_names=[]
-            - "agregar más" → add_product_to_order_smart
-            
-            IMPORTANTE: Identificar exactamente qué quiere cambiar del pedido actual.
-            """
-            
+                        
             modification_context = [
-                SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-                HumanMessage(content=modification_prompt)
+                SystemMessage(content=self.prompts.tools_execution_system(section["intent"], section["action"])),
+                HumanMessage(content=self.prompts.modificar_pedido_user(cliente_id, section))
             ]
             
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(modification_context)
@@ -421,13 +383,58 @@ class Workflow:
             else:
                 print("⚠️ No tools called for modification")
                 
+        #===CONFIRMACION===#
+        elif section["intent"] == "confirmacion":
+            
+            print("🔄 Detected confirmation intent - handling order confirmation")
+            
+            # """Handle order confirmation by creating order in database if products exist."""
+            # cliente_id = state.get("cliente_id", "")
+            # active_order = state.get("active_order", {})
+            
+            # print(f"🔄 Handling order confirmation for user {cliente_id}")
+            # print(f"📦 Active order has {len(active_order.get('productos', []))} items")
+            
+            # # Check if there are products to confirm
+            # if not active_order.get("productos"):
+            #     print("❌ No products in active order - cannot confirm")
+            #     return {"messages": []}
+            
+            # # Validate and prepare order for creation
+            # order_data = self._validate_and_prepare_order_for_creation(active_order, cliente_id)
+            
+            # print(f"✅ Order validated - creating with {len(order_data['items'])} items, total: ${order_data['total']}")
+            
+            # # Create enhanced prompt for order creation
+            # confirmation_prompt = self.prompts.confirmation_user(order_data)
+            
+            # # Create context and get LLM response
+            # context = [
+            #     SystemMessage(content=self.prompts.tools_execution_system(section["intent"], section["action"])),
+            #     HumanMessage(content=confirmation_prompt)
+            # ]
+            
+            # response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
+            
+            # if hasattr(response, "tool_calls") and response.tool_calls:
+            #     print(f"🔧 Creating order with tools: {[tc['name'] for tc in response.tool_calls]}")
+            #     for tool_call in response.tool_calls:
+            #         print(f"Tool: {tool_call['name']}, Args: {tool_call['args']}")
+            # else:
+            #     print("⚠️ No tools called for order confirmation")
+            
+            # return {"messages": [response]}
+            order_steps["seleccion_productos"] = 2
+            
+            updated_state = {"order_steps": order_steps}
+        
         #===GENERAL===#
         else:
             print(f"Sending enhanced prompt to LLM with tools...")
             # Create context with enhanced instructions
             context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("order_items", []), section))
+            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("productos", []), section))
             ]
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
             if hasattr(response.additional_kwargs, 'function'):
@@ -536,7 +543,7 @@ class Workflow:
                                 "order_id": "",
                                 "order_date": "",
                                 "order_total": 0.0,
-                                "order_items": []
+                                "productos": []
                             }
                             
                         # Client operations
@@ -577,15 +584,14 @@ class Workflow:
                             if "success" in add_result:
                                 products_added = True
                                 # Update local active_order from database to keep state in sync
-                                from src.services.tools import \
-                                    get_order_by_id
+                                from src.services.tools import get_order_by_id
                                 updated_order = get_order_by_id(cliente_id)
                                 if "error" not in updated_order:
                                     active_order.update({
                                         "order_id": str(updated_order["id"]),
                                         "order_date": updated_order.get("hora_ultimo_mensaje", ""),
                                         "order_total": add_result["data"]["order_total"],
-                                        "order_items": updated_order.get("pedido", {}).get("items", [])
+                                        "productos": updated_order.get("pedido", {}).get("items", [])
                                     })
                                     print(f"✅ Product added successfully: {add_result['success']}")
                                     print(f"📦 Updated order total: ${add_result['data']['order_total']}")
@@ -652,12 +658,12 @@ class Workflow:
         })
         
         # Get active order information
-        active_order = state.get("active_order", {"order_items": [], "order_total": 0.0})
+        active_order = state.get("active_order", {"productos": [], "total": 0.0})
         print(f"Active order: {active_order}")
         
-        order_items, order_total = [], 0
+        productos, order_total = [], 0
         if active_order:
-            order_items = active_order.get("order_items", [])
+            productos = active_order.get("productos", [])
             order_total = active_order.get("order_total", 0)
         
         messages = state.get("messages", [])
@@ -668,15 +674,15 @@ class Workflow:
             print("Marking saludo as completed (2) in send_response_step")
         
         # Determine the next incomplete state to progress to
-        next_incomplete_state = self.handles._get_next_incomplete_state(order_steps, order_items)
+        next_incomplete_state = self.actions._get_next_incomplete_state(order_steps, productos)
         
         # Build context based on current state and next action needed
-        context = self.handles._build_conversation_context(state)
+        context = self.actions._build_conversation_context(state)
         
         # Add order information to context if there are products
-        if len(order_items) > 0:
+        if len(productos) > 0:
             products_summary = []
-            for item in order_items:
+            for item in productos:
                 products_summary.append(f"- {item['product_name']} (${item['total_price']})")
             
             context.append(
@@ -691,7 +697,7 @@ class Workflow:
         if next_incomplete_state:
             context.append(
                 SystemMessage(
-                    content=self.handles._get_next_step_guidance(next_incomplete_state, order_steps, order_items)
+                    content=self.actions._get_next_step_guidance(next_incomplete_state, order_steps, productos)
                 )
             )
         else:
@@ -793,7 +799,7 @@ class Workflow:
                     print(f"   ✅ Contexto del cliente actualizado")
                 
                 # Update order context if we have an active order
-                if state.get("active_order") and state["active_order"].get("order_items"):
+                if state.get("active_order") and state["active_order"].get("productos"):
                     await memory.update_customer_context(
                         cliente_id,
                         "current_order",
