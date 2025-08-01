@@ -277,12 +277,6 @@ class Workflow:
         if active_order:
             order_items = active_order.get("order_items", [])
         
-        # Create context with enhanced instructions
-        context = [
-            SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("order_items", []), section))
-        ]
-        
         # Handle different intent types
         
         #===CONFIRMACION===#
@@ -416,6 +410,11 @@ class Workflow:
         #===GENERAL===#
         else:
             print(f"Sending enhanced prompt to LLM with tools...")
+            # Create context with enhanced instructions
+            context = [
+            SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
+            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("order_items", []), section))
+            ]
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
             if response.additional_kwargs:
                 print(f"Response retrieve_data_step: {response.additional_kwargs['function']}")

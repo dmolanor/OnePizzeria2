@@ -152,7 +152,7 @@ def get_order_total(id: int, items: list = None) -> dict:
 
 
 @tool
-def add_products_to_order(cliente_id: str, product_data: dict) -> dict:
+def add_products_to_order(cliente_id: str, product_data: list) -> dict:
     """
     Agrega un producto estructurado al pedido activo de un cliente.
     
