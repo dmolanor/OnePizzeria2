@@ -177,6 +177,7 @@ INSTRUCCIÓN: Analiza el mensaje paso a paso y extrae todas las intenciones espe
                 3. **Selecciona herramientas**: ¿Cuáles necesitamos para completar la tarea?
                 4. **Extrae argumentos**: ¿Qué parámetros específicos necesitamos?
                 5. **Ejecuta en orden**: ¿Cuál es la secuencia correcta?
+                6. **Retorna el resultado**: ¿Qué resultado esperas obtener?
 
                 🛠️ HERRAMIENTAS ESPECIALIZADAS DISPONIBLES:"""
         
@@ -210,6 +211,14 @@ INSTRUCCIÓN: Analiza el mensaje paso a paso y extrae todas las intenciones espe
             
             add_products_to_order(cliente_id, product_data)
             """
+            
+        if intent == "personalizacion_productos":
+            prompt += """
+            - update_product_in_order(cliente_id, product_id, new_borde_name, new_adiciones_names) - Actualizar producto en el pedido
+            
+            Con esta función se actualiza el producto en el pedido activo, y se actualiza la base de datos.
+            El argumento product_id es el id del producto que se desea actualizar.
+            """
             return prompt
     
     TOOLS_EXECUTION_SYSTEM =f"""Eres un especialista en ejecución de herramientas para el sistema de pedidos de One Pizzería.
@@ -238,8 +247,8 @@ INSTRUCCIÓN: Analiza el mensaje paso a paso y extrae todas las intenciones espe
 - `calculate_order_total(cliente_id)` - Calcular total correcto del pedido activo
 
 **PRODUCTOS - HERRAMIENTAS INTELIGENTES (PREFERIDAS):**
-- `add_product_to_order_smart(cliente_id, product_data, borde_name, adiciones_names)` - ⭐ USAR SIEMPRE
-- `update_product_in_order_smart(cliente_id, product_id, new_borde_name, new_adiciones_names)` - ⭐ USAR SIEMPRE
+- `add_product_to_order(cliente_id, product_data, borde_name, adiciones_names)` - ⭐ USAR SIEMPRE
+- `update_product_in_order(cliente_id, product_id, new_borde_name, new_adiciones_names)` - ⭐ USAR SIEMPRE
 - `get_border_price_by_name(name)` - Obtener precio de borde específico
 - `get_adition_price_by_name(name)` - Obtener precio de adición específica
 - `remove_product_from_order(cliente_id, product_id)` - Remover producto
@@ -294,13 +303,13 @@ create_order(cliente_id="cliente_id", items=[], total=0.0)
 get_pizza_by_name(name="nombre_pizza_exacto")  # O get_beverage_by_name
 
 # 2. Agregar al pedido usando herramienta inteligente (SE EJECUTA AUTOMÁTICAMENTE EN WORKFLOW)
-# add_product_to_order_smart se ejecuta automáticamente cuando se encuentra un producto
+# add_product_to_order se ejecuta automáticamente cuando se encuentra un producto
 ```
 
 **personalizacion_productos:**
 ```
 # Al seleccionar productos, incluir personalizaciones:
-add_product_to_order_smart(
+add_product_to_order(
     cliente_id="cliente_id",
     product_data=producto_encontrado,
     borde_name="nombre_borde_exacto",  # Si especifica borde
@@ -311,7 +320,7 @@ add_product_to_order_smart(
 **modificar_pedido:**
 ```
 # Para cambiar personalizaciones de producto existente:
-update_product_in_order_smart(
+update_product_in_order(
     cliente_id="cliente_id",
     product_id="id_producto",
     new_borde_name="nuevo_borde",
@@ -345,7 +354,7 @@ finish_order(cliente_id="cliente_id")
 Acción: "solicita_pizza_pepperoni_grande_borde_ajo"
 Herramientas:
 1. get_pizza_by_name(name="pepperoni") 
-   # El workflow automáticamente ejecutará add_product_to_order_smart con borde_name="ajo"
+   # El workflow automáticamente ejecutará add_product_to_order con borde_name="ajo"
 ```
 
 **Ejemplo 2 - Modificación de pedido:**
@@ -353,7 +362,7 @@ Herramientas:
 Acción: "cambiar_borde_pizza_a_queso"
 Herramientas:
 1. get_order_details(cliente_id="cliente_id")  # Para obtener product_id
-2. update_product_in_order_smart(
+2. update_product_in_order(
      cliente_id="cliente_id",
      product_id="id_de_la_pizza",
      new_borde_name="queso"
@@ -372,7 +381,7 @@ Herramientas:
 ```
 
 ⚡ REGLAS CRÍTICAS:
-1. **SIEMPRE usa herramientas inteligentes**: Prefiere `add_product_to_order_smart` sobre `add_product_to_order`
+1. **SIEMPRE usa herramientas inteligentes**: Prefiere `add_product_to_order` sobre `add_product_to_order`
 2. **Extrae nombres exactos**: De productos, bordes, adiciones del texto del usuario
 3. **Verifica antes de crear**: Usa `get_active_order_by_client` antes de `create_order`
 4. **Personalizaciones automáticas**: Las herramientas inteligentes manejan precios automáticamente
@@ -447,8 +456,8 @@ EJECUTA las herramientas necesarias ahora.
 🛠️ HERRAMIENTAS PARA PERSONALIZACIÓN:
 - `get_border_by_name(name)` - Verificar disponibilidad de borde
 - `get_adition_by_name(name)` - Verificar disponibilidad de adición
-- `add_product_to_order_smart(cliente_id, product_data, borde_name, adiciones_names)` - Agregar con personalizaciones
-- `update_product_in_order_smart(cliente_id, product_id, new_borde_name, new_adiciones_names)` - Modificar personalizaciones
+- `add_product_to_order(cliente_id, product_data, borde_name, adiciones_names)` - Agregar con personalizaciones
+- `update_product_in_order(cliente_id, product_id, new_borde_name, new_adiciones_names)` - Modificar personalizaciones
 
 💡 CONSEJOS DE VENTA:
 - Sugiere personalizaciones populares cuando el cliente duda
@@ -680,9 +689,9 @@ Cada cliente debe sentir que tuvo una experiencia excepcional, personalizada y e
 4. **Cambiar cantidad** de productos (remover y agregar nuevos)
 
 🛠️ HERRAMIENTAS ESPECIALIZADAS:
-- `update_product_in_order_smart(cliente_id, product_id, new_borde_name, new_adiciones_names)`
+- `update_product_in_order(cliente_id, product_id, new_borde_name, new_adiciones_names)`
 - `remove_product_from_order(cliente_id, product_id)`
-- `add_product_to_order_smart(cliente_id, product_data, borde_name, adiciones_names)`
+- `add_product_to_order(cliente_id, product_data, borde_name, adiciones_names)`
 
 📝 EJEMPLO DE MODIFICACIÓN:
 Cliente: "Mejor cambio el borde de ajo por queso"
@@ -768,7 +777,7 @@ FLUJO OPTIMIZADO:
 
 HERRAMIENTAS CLAVE:
 - create_client/update_client para registro
-- add_product_to_order_smart para productos
+- add_product_to_order para productos
 - update_order para finalización
 """
 
