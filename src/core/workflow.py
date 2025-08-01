@@ -1,6 +1,7 @@
 import json
 import re
 from typing import Annotated, Any, Dict, List, Literal
+from datetime import datetime
 
 from langchain_core.messages import (AIMessage, BaseMessage, HumanMessage,
                                      SystemMessage, ToolMessage)
@@ -113,7 +114,6 @@ class Workflow:
                 "consulta_menu": 0,
                 "crear_pedido": 0,
                 "seleccion_productos": 0,
-                "confirmacion": 0,
                 "finalizacion": 0,
                 "general": 0
             })
@@ -198,7 +198,7 @@ class Workflow:
                     elif intent == "seleccion_productos":
                         # Check if we need to create an order first
                         if existing_order_steps.get("crear_pedido", 0) == 0:
-                            existing_order_steps["crear_pedido"] = 1
+                            existing_order_steps["crear_pedido"] = 2
                             print(f"Auto-triggered crear_pedido for product selection")
                         
                 else:
@@ -217,7 +217,6 @@ class Workflow:
                 "consulta_menu": existing_order_steps.get("consulta_menu", 0),
                 "crear_pedido": existing_order_steps.get("crear_pedido", 0),
                 "seleccion_productos": existing_order_steps.get("seleccion_productos", 0),
-                "confirmacion": existing_order_steps.get("confirmacion", 0),
                 "finalizacion": existing_order_steps.get("finalizacion", 0),
                 "general": existing_order_steps.get("general", 0)
             }
@@ -242,14 +241,12 @@ class Workflow:
                 "consulta_menu": existing_states.get("consulta_menu", 0),
                 "crear_pedido": existing_states.get("crear_pedido", 0),
                 "seleccion_productos": existing_states.get("seleccion_productos", 0),
-                "confirmacion": existing_states.get("confirmacion", 0),
                 "finalizacion": existing_states.get("finalizacion", 0),
                 "general": existing_states.get("general", 0)
             }
     
     async def retrieve_data_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Retrieve relevant data based on user intent."""
-        from datetime import datetime
         print("=== RETRIEVE DATA STEP START ===")
         print(f"Retrieving data based on divided messages... {state['divided_message']}")
         
@@ -261,26 +258,37 @@ class Workflow:
         i = len(state["divided_message"])
         section = state["divided_message"].pop()
         cliente_id = state.get("cliente_id", "")
+        order_steps = state.get("order_steps", {})
         
         print(f"Processing section {i}: {section}")
         print(f"User ID: {cliente_id}")
         
         # Get existing order from state or create new one
         active_order = state.get("active_order", {
-            "order_id": f"order_{cliente_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            "order_date": datetime.now().isoformat(),
-            "order_total": 0.0,
-            "order_items": []
+            "id": f"order_{cliente_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "fecha": datetime.now().isoformat(),
+            "cliente_id": cliente_id,
+            "estado": "activo",
+            "total": 0.0,
+            "productos": []
         })
         
-        order_items = []
-        if active_order:
-            order_items = active_order.get("order_items", [])
+        if not active_order:
+            print("🔄 No active order found - creating new one")
+            active_order = {
+                "cliente_id": cliente_id,
+                "fecha": datetime.now().isoformat(),
+                "estado": "activo",
+                "total": 0.0,
+                "productos": []
+            }
+        
+        productos_pedido = active_order.get("productos", [])
         
         # Create context with enhanced instructions
         context = [
             SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("order_items", []), section))
+            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, productos_pedido, section))
         ]
         
         # Handle different intent types
@@ -289,9 +297,10 @@ class Workflow:
         if section["intent"] == "confirmacion":
             
             print("🔄 Detected confirmation intent - handling order confirmation")
-            confirmation_result = await self.handles._handle_order_confirmation(state, section)
-            updated_state = {"messages": confirmation_result["messages"]}
+            order_steps["seleccion_productos"] = 2
             
+            updated_state = {"order_steps": order_steps}
+
         #===CREAR PEDIDO===#    
         elif section["intent"] == "crear_pedido":
             
@@ -303,9 +312,8 @@ class Workflow:
                 
             elif hasattr(order_response, "fail"):
                 print("🔄 Detected crear_pedido intent - order does not exist in database - creating new order in database")
-                
-                active_order = supabase.table("pedidos_activos").insert({"cliente_id": cliente_id, "items": [], "total": 0.0}).execute()
-                updated_state = {"active_order": active_order.data[0]}
+                new_order = supabase.table("pedidos_activos").insert({"cliente_id": cliente_id, "productos": [], "total": 0.0}).execute()
+                updated_state = {"active_order": new_order.data[0]}
                         
         #===SELECCION DE PRODUCTOS===#
         elif section["intent"] == "seleccion_productos":
@@ -417,7 +425,7 @@ class Workflow:
         else:
             print(f"Sending enhanced prompt to LLM with tools...")
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
-            if response.additional_kwargs:
+            if hasattr(response.additional_kwargs, 'function'):
                 print(f"Response retrieve_data_step: {response.additional_kwargs['function']}")
             updated_state = {"messages": list(state["messages"]) + [response]}
             
@@ -433,7 +441,7 @@ class Workflow:
                         print(f"Product search detected, will add to order after tool execution")
                     elif tool_call['name'] == 'create_order':
                         print(f"🎯 Order creation detected - this will create pedido_activo")
-                    elif tool_call['name'] == 'get_active_order_by_client':
+                    elif tool_call['name'] == 'get_order_by_id':
                         print(f"🔍 Checking for existing active order")
             else:
                 print("ℹ️  No tools called for this section")
@@ -450,7 +458,6 @@ class Workflow:
     
     async def process_tool_results_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Process tool execution results and sync with pedidos_activos."""
-        from datetime import datetime
         
         print(f"=== PROCESSING TOOL RESULTS ===")
         
@@ -459,10 +466,10 @@ class Workflow:
         
         # Get existing active_order or create new one with proper structure
         active_order = state.get("active_order", {
-            "order_id": f"order_{cliente_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            "order_date": datetime.now().isoformat(),
-            "order_total": 0.0,
-            "order_items": []
+            "cliente_id": cliente_id,
+            "fecha": datetime.now().isoformat(),
+            "total": 0.0,
+            "productos": []
         })
         
         # Get existing order_steps and preserve them
@@ -473,35 +480,25 @@ class Workflow:
             "consulta_menu": 0,
             "crear_pedido": 0,
             "seleccion_productos": 0,
-            "confirmacion": 0,
             "finalizacion": 0,
             "general": 0
         })
-    
+
         
-        order_items, order_total = [], 0
-        if active_order_data:
-            order_items = active_order_data.get("order_items", [])
-            order_total = active_order_data.get("order_total", 0)
-        
-        print(f"Current order state: {len(order_items)} items, total: ${order_total}")
-        print(f"Current order_steps: {order_steps}")
-        
-        # Track actions completed in this step
         products_added = False
+        client_info_updated = False
+        address_updated = False
         order_created = False
         order_updated = False
         order_finalized = False
         
         # Look for ToolMessage in recent messages
-        print(f"Last 5 messages: {reversed(messages[-5:])}")
         for message in reversed(messages[-5:]):  # Check last 5 messages
             if isinstance(message, ToolMessage):
                 print(f"🔧 Processing ToolMessage: {message.tool_call_id}")
                 print(f"   Content preview: {message.content[:100]}...")
                 
                 try:
-                    import json
                     tool_result = json.loads(message.content)
                     print("=============================================================")
                     print("=============================================================")
@@ -576,8 +573,8 @@ class Workflow:
                                 products_added = True
                                 # Update local active_order from database to keep state in sync
                                 from src.services.tools import \
-                                    get_active_order_by_client
-                                updated_order = get_active_order_by_client(cliente_id)
+                                    get_order_by_id
+                                updated_order = get_order_by_id(cliente_id)
                                 if "error" not in updated_order:
                                     active_order.update({
                                         "order_id": str(updated_order["id"]),
@@ -601,9 +598,9 @@ class Workflow:
                     print(f"Error processing tool result: {e}")
         
         # Update order_steps based on successful actions
-        if products_added:
-            order_steps["seleccion_productos"] = 2  # Mark as completed
-            print("✅ Products added - marking seleccion_productos as completed (2)")
+        if products_added and order_steps["seleccion_productos"] != 2:
+            order_steps["seleccion_productos"] = 1  # Mark as completed
+            print("✅ Products added - marking seleccion_productos as in progress (1)")
             
         return {
             "active_order": active_order_data,
@@ -615,7 +612,6 @@ class Workflow:
             "consulta_menu": order_steps.get("consulta_menu", 0),
             "crear_pedido": order_steps.get("crear_pedido", 0),
             "seleccion_productos": order_steps.get("seleccion_productos", 0),
-            "confirmacion": order_steps.get("confirmacion", 0),
             "finalizacion": order_steps.get("finalizacion", 0),
             "general": order_steps.get("general", 0)
         }
@@ -646,7 +642,6 @@ class Workflow:
             "registro_direccion": 0,
             "consulta_menu": 0,
             "seleccion_productos": 0,
-            "confirmacion": 0,
             "finalizacion": 0,
             "general": 0
         })
@@ -725,7 +720,6 @@ class Workflow:
             "consulta_menu": order_steps.get("consulta_menu", 0),
             "crear_pedido": order_steps.get("crear_pedido", 0),
             "seleccion_productos": order_steps.get("seleccion_productos", 0),
-            "confirmacion": order_steps.get("confirmacion", 0),
             "finalizacion": order_steps.get("finalizacion", 0),
             "general": order_steps.get("general", 0)
         }

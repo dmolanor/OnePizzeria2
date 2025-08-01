@@ -19,7 +19,7 @@ class Handles:
     def _get_next_incomplete_state(self, order_steps: Dict[str, int], order_items: List) -> str:
         """Determine the next incomplete state that needs to be addressed."""
         # Define the order of required states
-        required_states = [
+        required_steps = [
             "saludo",
             "crear_pedido",
             "seleccion_productos",
@@ -32,41 +32,41 @@ class Handles:
         print(f"🔍 Checking states for next incomplete: {order_steps}")
         print(f"📦 Order items count: {len(order_items) if order_items else 0}")
         
-        for state_name in required_states:
-            current_value = order_steps.get(state_name, 0)
-            print(f"  - {state_name}: {current_value}")
+        for step_name in required_steps:
+            current_value = order_steps.get(step_name, 0)
+            print(f"  - {step_name}: {current_value}")
             
             if current_value != 2:  # Not completed
                 # Special logic for some states
-                if state_name == "crear_pedido":
+                if step_name == "crear_pedido":
                     if len(order_items) == 0 and current_value == 0:
-                        print(f"🎯 Next state: {state_name} (no order created yet)")
-                        return state_name
+                        print(f"🎯 Next state: {step_name} (no order created yet)")
+                        return step_name
                     elif current_value == 1:
-                        print(f"🔄 {state_name} in progress, continuing...")
+                        print(f"🔄 {step_name} in progress, continuing...")
                         continue
-                elif state_name == "seleccion_productos":
+                elif step_name == "seleccion_productos":
                     if len(order_items) == 0:
                         # If no order created yet, need to create order first
                         if order_steps.get("crear_pedido", 0) != 2:
                             print(f"🎯 Next state: crear_pedido (needed before selecting products)")
                             return "crear_pedido"
                         else:
-                            print(f"🎯 Next state: {state_name} (no products selected)")
-                            return state_name
+                            print(f"🎯 Next state: {step_name} (no products selected)")
+                            return step_name
                     else:
                         # If we have products, mark this as completed
-                        print(f"✅ {state_name} should be completed (has {len(order_items)} products)")
+                        print(f"✅ {step_name} should be completed (has {len(order_items)} products)")
                         continue
-                elif state_name == "confirmacion":
+                elif step_name == "confirmacion":
                     if len(order_items) > 0 and order_steps.get("seleccion_productos", 0) == 2:
-                        print(f"🎯 Next state: {state_name} (ready for confirmation)")
-                        return state_name
+                        print(f"🎯 Next state: {step_name} (ready for confirmation)")
+                        return step_name
                     else:
                         continue
                 else:
-                    print(f"🎯 Next state: {state_name}")
-                    return state_name
+                    print(f"🎯 Next state: {step_name}")
+                    return step_name
         
         print("✅ All states completed")
         return None  # All states completed

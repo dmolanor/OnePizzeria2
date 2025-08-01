@@ -4,6 +4,7 @@ This defines what information flows through our conversation graph.
 """
 import hashlib
 from datetime import datetime
+from socket import gethostbyname
 from typing import Annotated, Any, Dict, List, Optional, Sequence, TypedDict
 
 from langchain_core.messages import BaseMessage
@@ -11,21 +12,24 @@ from pydantic import BaseModel, Field
 
 
 class ProductDetails(BaseModel):
-    product_id: str
-    product_name:str
-    product_type: str
+    id_producto: str
+    nombre: str
+    tipo: str
     tamaño: str
     borde: Dict[str, Any] = {}
     adiciones: List[Dict[str, Any]] = []
-    base_price: float = 0.0
-    total_price: float = 0.0
+    precio_base: float = 0.0
+    precio_total: float = 0.0
     
 
 class Order(BaseModel):
-    order_id: str
-    order_date: str
-    order_total: float
-    order_items: List[ProductDetails]
+    cliente_id: str
+    estado: str
+    fecha: str
+    direccion_entrega: str
+    metodo_pago: str
+    total: float
+    productos: List[ProductDetails]
 
 
 class MessageValidator:

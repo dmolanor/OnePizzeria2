@@ -1,4 +1,5 @@
 import os
+from typing import List
 
 from langchain_core.tools import tool
 from pydantic.v1.errors import NoneIsAllowedError
@@ -28,44 +29,6 @@ def get_order_by_id(cliente_id: str) -> dict:
             return {"fail": f"Pedido con ID {cliente_id} no encontrado"}
     except Exception as e:
         return {"error": f"Error al buscar pedido: {str(e)}"}
-    
-@tool
-def create_order(cliente_id: str, items: list = None, total: float = 0.0, direccion_entrega: str = None, estado: str = "PREPARANDO") -> dict:
-    """
-    Crea un nuevo pedido activo.
-    
-    Args:
-        cliente_id: ID del cliente (string)
-        items: Lista de productos del pedido (opcional)
-        total: Total del pedido (float, opcional)
-        direccion_entrega: Dirección de entrega (string, opcional)
-        estado: Estado del pedido (string, por defecto "PREPARANDO")
-        
-    Returns:
-        dict: Resultado de la operación
-        
-    Example:
-        create_order("7315133184", [{"pizza": "pepperoni", "tamaño": "large", "precio": 25000}], 25000, "Calle 123")
-    """
-    try:
-        # Preparar datos del pedido en formato JSONB
-        pedido_data = {
-            "items": items or [],
-            "total": total,
-            "fecha_creacion": "now()"
-        }
-        
-        order_data = {
-            "cliente_id": cliente_id,
-            "estado": estado,
-            "direccion_entrega": direccion_entrega,
-            "pedido": pedido_data
-        }
-        
-        result = supabase.table("pedidos_activos").insert(order_data).execute()
-        return {"success": "Pedido creado exitosamente", "data": result.data}
-    except Exception as e:
-        return {"error": f"Error al crear pedido: {str(e)}"}
     
     
 @tool
@@ -152,7 +115,7 @@ def get_order_total(id: int, items: list = None) -> dict:
 
 
 @tool
-def add_products_to_order(cliente_id: str, product_data: dict) -> dict:
+def add_products_to_order(cliente_id: str, product_data: list[dict]) -> dict:
     """
     Agrega un producto estructurado al pedido activo de un cliente.
     
@@ -174,92 +137,96 @@ def add_products_to_order(cliente_id: str, product_data: dict) -> dict:
         from src.core.state import ProductDetails
 
         # Get or create active order
-        active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
+        pedido_activo = get_order_by_id.invoke({"cliente_id": cliente_id})
         
-        if "fail" in active_order or "error" in active_order:
-            # Create new order if none exists
-            create_result = create_order.invoke({"cliente_id": cliente_id, "items": [], "total": 0.0})
-            if "error" in create_result:
-                return create_result
-            active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
-            if "error" in active_order:
-                return {"error": "Failed to create or retrieve order"}
+        if "fail" in pedido_activo or "error" in pedido_activo:
+            # Create new order if none exists   
+            pedido_activo = supabase.table("pedidos_activos").insert({"cliente_id": cliente_id, "productos": [], "total": 0.0}).execute().data[0]
+
+        order_id = pedido_activo["id"]
+        productos_actual= pedido_activo.get("productos", [])
+        answer_message = []
         
-        order_id = active_order["data"]["id"]
-        current_pedido = active_order.data[0]["data"].get("products", {})
-        current_items = current_pedido.get("items", [])
-        
-        # Create structured product using ProductDetails
-        base_price = float(product_data.get("precio", product_data.get("price", 0)))
-        total_price = base_price
-        
-        # Calculate borde price
-        borde_data = {}
-        if borde and product_data.get("tipo", "").lower() == "pizza":
-            borde_data = {
-                "nombre": borde.get("nombre", ""),
-                "precio_adicional": float(borde.get("precio_adicional", 0))
-            }
-            total_price += borde_data["precio_adicional"]
-        
-        # Calculate adiciones price
-        adiciones_data = []
-        if adiciones and product_data.get("tipo", "").lower() == "pizza":
-            for adicion in adiciones:
-                adicion_data = {
-                    "nombre": adicion.get("nombre", ""),
-                    "precio_adicional": float(adicion.get("precio_adicional", 0))
-                }
-                adiciones_data.append(adicion_data)
-                total_price += adicion_data["precio_adicional"]
-        
-        # Create structured product dict following ProductDetails schema
-        structured_product = {
-            "product_id": str(product_data.get("id", "")),
-            "product_name": product_data.get("nombre", product_data.get("nombre_producto", "")),
-            "product_type": product_data.get("tipo", "pizza" if "categoria" in product_data else "bebida"),
-            "base_price": base_price,
-            "total_price": total_price,
-            "borde": borde_data,
-            "adiciones": adiciones_data,
-            # Additional fields for compatibility
-            "id": str(product_data.get("id", "")),
-            "nombre": product_data.get("nombre", product_data.get("nombre_producto", "")),
-            "tipo": product_data.get("tipo", "pizza" if "categoria" in product_data else "bebida"),
-            "precio": total_price,
-            "tamano": product_data.get("tamano", ""),
-            "categoria": product_data.get("categoria", ""),
-            "descripcion": product_data.get("descripcion", product_data.get("texto_ingredientes", "")),
-            "activo": product_data.get("activo", True)
-        }
-        
-        # Add to current items
-        current_items.append(structured_product)
-        
-        # Calculate new total
-        new_total = sum(item.get("total_price", item.get("precio", 0)) for item in current_items)
-        
-        # Update the order
-        update_result = update_order.invoke({
-            "id": order_id,
-            "items": current_items,
-            "total": new_total
-        })
-        
-        if "success" in update_result:
-            return {
-                "success": f"Producto '{structured_product['product_name']}' agregado exitosamente al pedido",
-                "data": {
-                    "product": structured_product,
-                    "order_total": new_total,
-                    "order_id": order_id
-                }
-            }
-        else:
-            return update_result
+        for new_product in product_data:
+    
+                if new_product["tipo_producto"] == "pizza":
+                    
+                    if "tamaño" in new_product:
+                        pizza = get_pizza_by_name_and_size.invoke({"nombre": new_product["nombre"], "tamaño": new_product["tamaño"]})
+                        if "error" in pizza:
+                            answer_message.append({"error": f"Error al obtener pizza: {str(pizza['error'])}"})
+                            continue
+                    else:
+                        answer_message.append({"error": "No se proporcionó el tamaño de la pizza"})
+                        continue
+                    
+                    add_product=ProductDetails(
+                        id_producto=pizza.get("data").get("id"),
+                        nombre=pizza.get("data").get("nombre"),
+                        tipo=pizza.get("data").get("tipo"),
+                        precio_base=pizza.get("data").get("precio"),
+                        precio_total=pizza.get("data").get("precio")
+                    )
+                    
+                    if "borde" in new_product:
+                        borde = get_border_by_name.invoke({"nombre": new_product["borde"]})
+                        if "error" in borde:
+                            answer_message.append({"error": f"Error al obtener borde: {str(borde['error'])}"})
+                            continue
+                        add_product.borde = {
+                            "id": borde.get("data").get("id"),
+                            "nombre": borde.get("data").get("nombre"),
+                            "precio_adicional": borde.get("data").get("precio_adicional")
+                        }
+                        add_product.precio_total += borde.get("data").get("precio_adicional")   
+                    
+                    if "adiciones" in new_product:
+                        adiciones = get_adition_by_name_and_size.invoke({"nombre": new_product["adiciones"], "tamaño": new_product["tamaño"]})
+                        if "error" in adiciones:
+                            answer_message.append({"error": f"Error al obtener adiciones: {str(adiciones['error'])}"})
+                            continue
+                        add_product.adiciones.append({
+                            "id": adiciones.get("data").get("id"),
+                            "nombre": adiciones.get("data").get("nombre"),
+                            "ingrediente_id": adiciones.get("data").get("ingrediente_id"),
+                            "tamaño_pizza": adiciones.get("data").get("tamaño_pizza"),
+                            "precio_adicional": adiciones.get("data").get("precio_adicional")
+                        })
+                        add_product.precio_total += adiciones.get("data").get("precio_adicional")   
+                
+                elif new_product["tipo_producto"] == "bebida":
+                    bebida = get_beverage_by_name.invoke({"nombre": new_product["nombre"]})
+                    if "error" in bebida:
+                        answer_message.append({"error": f"Error al obtener bebida: {str(bebida['error'])}"})
+                        continue
+                    add_product=ProductDetails(
+                        id_producto=bebida.get("data").get("id"),
+                        nombre=bebida.get("data").get("nombre"),
+                        tipo=bebida.get("data").get("tipo"),
+                        precio_base=bebida.get("data").get("precio"),
+                        precio_total=bebida.get("data").get("precio")
+                    )
+                else:
+                    answer_message.append({"error": f"Tipo de producto no válido: {new_product['tipo_producto']}"})
+                    continue
+                
+                # Agregar a productos del pedido actual
+                productos_actual.append(add_product)
+                
+                # Actualizar pedido en base de datos
+                pedido_actualizado = supabase.table("pedidos_activos").update({"productos": productos_actual}).eq("id", order_id).execute()
+                if "error" in pedido_actualizado:
+                    answer_message.append({"error": f"Error al actualizar pedido: {str(pedido_actualizado['error'])}"})
+                    continue
+                elif "success" in pedido_actualizado:
+                    answer_message.append({"success": f"Producto '{add_product.nombre}' agregado exitosamente al pedido", "data": pedido_actualizado.data[0]})
+                else:
+                    answer_message.append({"error": f"Error al actualizar pedido: {str(pedido_actualizado['error'])}"})
+                    continue
+        return answer_message
             
     except Exception as e:
-        return {"error": f"Error al agregar producto al pedido: {str(e)}"}
+        return {"error": f"Error al obtener producto: {str(e)}"}
 
 
 @tool
@@ -302,13 +269,9 @@ def remove_product_from_order(cliente_id: str, product_id: str) -> dict:
         new_total = sum(item.get("total_price", item.get("precio", 0)) for item in updated_items)
         
         # Update the order
-        update_result = update_order.invoke({
-            "id": order_id,
-            "items": updated_items,
-            "total": new_total
-        })
+        update_result = supabase.table("pedidos_activos").update({"id": order_id, "productos": updated_items, "total": new_total}).eq("id", order_id).execute()
         
-        if "success" in update_result:
+        if update_result.data:
             return {
                 "success": f"Producto '{removed_product.get('product_name', removed_product.get('nombre', 'Unknown'))}' removido exitosamente del pedido",
                 "data": {
@@ -325,7 +288,7 @@ def remove_product_from_order(cliente_id: str, product_id: str) -> dict:
 
 
 @tool
-def update_product_in_order(cliente_id: str, product_id: str, new_borde: dict = None, new_adiciones: list = None) -> dict:
+def modify_product_from_order(cliente_id: str, product_id: str, new_borde: dict = None, new_adiciones: list = None) -> dict:
     """
     Actualiza las personalizaciones de un producto en el pedido activo.
     
@@ -408,17 +371,17 @@ def update_product_in_order(cliente_id: str, product_id: str, new_borde: dict = 
         new_total = sum(item.get("total_price", item.get("precio", 0)) for item in updated_items)
         
         # Update the order
-        update_result = update_order.invoke({
+        update_result = supabase.table("pedidos_activos").update({
             "id": order_id,
             "items": updated_items,
             "total": new_total
-        })
+        }).eq("id", order_id).execute()
         
-        if "success" in update_result:
+        if update_result.data:
             return {
-                "success": f"Producto '{updated_product.get('product_name', updated_product.get('nombre', 'Unknown'))}' actualizado exitosamente",
+                "success": f"Producto '{updated_product.data[0].get('product_name', updated_product.data[0].get('nombre', 'Unknown'))}' actualizado exitosamente",
                 "data": {
-                    "updated_product": updated_product,
+                    "updated_product": updated_product.data[0],
                     "order_total": new_total
                 }
             }
@@ -862,6 +825,33 @@ def get_adition_by_name( name: str) -> dict:
 
 
 @tool
+def get_adition_by_name_and_size( name: str, size: str) -> dict:
+    """
+    Obtiene una adición por su nombre desde la base de datos.
+    
+    Args:
+        name: Nombre de la adición a buscar (ej: "cebolla", "queso", "huevo")
+        size: Tamaño de la adición a buscar (ej: "Small", "Medium", "Large")
+            
+    Returns:
+        dict: Datos de la adición si existe
+        
+    Example:
+        get_adition_by_name("cebolla")
+    """
+    try:
+        result = supabase.table("adiciones").select("*").eq("nombre", name).eq("tamaño_pizza", size).execute().data[0]
+        if not result:
+            result = supabase.table("adiciones").select("*").ilike("nombre", f"%{name}%").eq("tamaño_pizza", size).execute().data[0]
+        
+        if result:
+            return {"success": "Adición encontrada", "data": result}
+        else:
+            return {"error": f"Adición '{name}' no encontrada"}
+    except Exception as e:
+        return {"error": f"Error al buscar adición: {str(e)}"}
+
+@tool
 def get_borders(self) -> list[dict]:
     """
     Obtiene todos los bordes disponibles en la base de datos.
@@ -909,196 +899,6 @@ def get_border_by_name( name: str) -> dict:
             return {"error": f"Borde '{name}' no encontrado"}
     except Exception as e:
         return {"error": f"Error al buscar borde: {str(e)}"}
-
-
-@tool
-def get_border_price_by_name(name: str) -> dict:
-    """
-    Obtiene el precio de un borde por su nombre desde la base de datos.
-    
-    Args:
-        name: Nombre del borde a buscar
-        
-    Returns:
-        dict: Precio del borde si existe
-    """
-    try:
-        # Buscar con nombre exacto primero
-        result = supabase.table("bordes").select("*").eq("nombre", name).execute()
-        
-        if not result.data:
-            # Buscar con ilike para mayor flexibilidad
-            result = supabase.table("bordes").select("*").ilike("nombre", f"%{name}%").execute()
-        
-        if result.data:
-            borde_data = result.data[0]
-            return {
-                "success": "Borde encontrado",
-                "data": {
-                    "nombre": borde_data.get("nombre", ""),
-                    "precio_adicional": float(borde_data.get("precio", 0))
-                }
-            }
-        else:
-            return {"error": f"Borde '{name}' no encontrado"}
-    except Exception as e:
-        return {"error": f"Error al buscar precio del borde: {str(e)}"}
-
-
-@tool
-def get_adition_price_by_name(name: str) -> dict:
-    """
-    Obtiene el precio de una adición por su nombre desde la base de datos.
-    
-    Args:
-        name: Nombre de la adición a buscar
-        
-    Returns:
-        dict: Precio de la adición si existe
-    """
-    try:
-        # Buscar con nombre exacto primero
-        result = supabase.table("adiciones").select("*").eq("nombre", name).execute()
-        
-        if not result.data:
-            # Buscar con ilike para mayor flexibilidad
-            result = supabase.table("adiciones").select("*").ilike("nombre", f"%{name}%").execute()
-        
-        if result.data:
-            adicion_data = result.data[0]
-            return {
-                "success": "Adición encontrada",
-                "data": {
-                    "nombre": adicion_data.get("nombre", ""),
-                    "precio_adicional": float(adicion_data.get("precio", 0))
-                }
-            }
-        else:
-            return {"error": f"Adición '{name}' no encontrada"}
-    except Exception as e:
-        return {"error": f"Error al buscar precio de la adición: {str(e)}"}
-
-
-@tool
-def add_product_to_order_smart(cliente_id: str, product_data: dict, borde_name: str = None, adiciones_names: list = None) -> dict:
-    """
-    Agrega un producto al pedido obteniendo automáticamente los precios de bordes y adiciones desde la BD.
-    
-    Args:
-        cliente_id: ID del cliente (string)
-        product_data: Datos del producto (debe incluir: id, nombre, tipo, precio)
-        borde_name: Nombre del borde (opcional) - se buscarán los precios automáticamente
-        adiciones_names: Lista de nombres de adiciones (opcional) - se buscarán los precios automáticamente
-        
-    Returns:
-        dict: Resultado de la operación
-        
-    Example:
-        add_product_to_order_smart(
-            "7315133184",
-            {"id": "1", "nombre": "Pepperoni", "tipo": "pizza", "precio": 25000},
-            "pimentón",
-            ["queso extra", "champiñones"]
-        )
-    """
-    try:
-        borde_data = None
-        adiciones_data = []
-        
-        # Get borde price from database if specified
-        if borde_name and product_data.get("tipo", "").lower() == "pizza":
-            borde_result = get_border_price_by_name.invoke({"name": borde_name})
-            if "success" in borde_result:
-                borde_data = borde_result["data"]
-            else:
-                # Use default price if not found
-                borde_data = {
-                    "nombre": borde_name,
-                    "precio_adicional": 2000  # Default fallback
-                }
-                print(f"⚠️ Borde '{borde_name}' not found in DB, using default price")
-        
-        # Get adiciones prices from database if specified
-        if adiciones_names and product_data.get("tipo", "").lower() == "pizza":
-            for adicion_name in adiciones_names:
-                adicion_result = get_adition_price_by_name.invoke({"name": adicion_name})
-                if "success" in adicion_result:
-                    adiciones_data.append(adicion_result["data"])
-                else:
-                    # Use default price if not found
-                    adiciones_data.append({
-                        "nombre": adicion_name,
-                        "precio_adicional": 5000  # Default fallback
-                    })
-                    print(f"⚠️ Adición '{adicion_name}' not found in DB, using default price")
-        
-        # Call the base add_product_to_order function with the fetched data
-        return add_product_to_order.invoke({
-            "cliente_id": cliente_id,
-            "product_data": product_data,
-            "borde": borde_data,
-            "adiciones": adiciones_data
-        })
-        
-    except Exception as e:
-        return {"error": f"Error al agregar producto inteligente al pedido: {str(e)}"}
-
-
-@tool
-def update_product_in_order_smart(cliente_id: str, product_id: str, new_borde_name: str = None, new_adiciones_names: list = None) -> dict:
-    """
-    Actualiza un producto en el pedido obteniendo automáticamente los precios de bordes y adiciones desde la BD.
-    
-    Args:
-        cliente_id: ID del cliente (string)
-        product_id: ID del producto a actualizar (string)
-        new_borde_name: Nuevo nombre del borde (opcional) - se buscarán los precios automáticamente
-        new_adiciones_names: Nuevos nombres de adiciones (opcional) - se buscarán los precios automáticamente
-        
-    Returns:
-        dict: Resultado de la operación
-    """
-    try:
-        new_borde_data = None
-        new_adiciones_data = []
-        
-        # Get borde price from database if specified
-        if new_borde_name:
-            borde_result = get_border_price_by_name.invoke({"name": new_borde_name})
-            if "success" in borde_result:
-                new_borde_data = borde_result["data"]
-            else:
-                # Use default price if not found
-                new_borde_data = {
-                    "nombre": new_borde_name,
-                    "precio_adicional": 2000  # Default fallback
-                }
-                print(f"⚠️ Borde '{new_borde_name}' not found in DB, using default price")
-        
-        # Get adiciones prices from database if specified
-        if new_adiciones_names:
-            for adicion_name in new_adiciones_names:
-                adicion_result = get_adition_price_by_name.invoke({"name": adicion_name})
-                if "success" in adicion_result:
-                    new_adiciones_data.append(adicion_result["data"])
-                else:
-                    # Use default price if not found
-                    new_adiciones_data.append({
-                        "nombre": adicion_name,
-                        "precio_adicional": 5000  # Default fallback
-                    })
-                    print(f"⚠️ Adición '{adicion_name}' not found in DB, using default price")
-        
-        # Call the base update_product_in_order function with the fetched data
-        return update_product_in_order.invoke({
-            "cliente_id": cliente_id,
-            "product_id": product_id,
-            "new_borde": new_borde_data,
-            "new_adiciones": new_adiciones_data
-        })
-        
-    except Exception as e:
-        return {"error": f"Error al actualizar producto inteligente en el pedido: {str(e)}"}
 
 
 #=========================================================#
@@ -1186,50 +986,6 @@ def send_inline_keyboard(message: str, buttons: list) -> dict:
         return {"error": f"Error al enviar teclado: {str(e)}"}
 
 @tool
-def send_menu_message(title: str, items: list[dict], show_prices: bool = True) -> dict:
-    """
-    Envía un mensaje formateado como menú.
-    
-    Args:
-        title: Título del menú
-        items: Lista de items del menú. Formato:
-               [{"name": "Nombre", "description": "Desc", "price": 1000}]
-        show_prices: Si se deben mostrar los precios
-        
-    Returns:
-        dict: Resultado de la operación
-        
-    Example:
-        send_menu_message(
-            "🍕 Nuestras Pizzas",
-            [
-                {
-                    "name": "Pepperoni",
-                    "description": "Pepperoni y queso",
-                    "price": 25000
-                }
-            ]
-        )
-    """
-    try:
-        formatted_menu = f"<b>{title}</b>\n\n"
-        for item in items:
-            formatted_menu += f"• <b>{item['name']}</b>\n"
-            if item.get('description'):
-                formatted_menu += f"  {item['description']}\n"
-            if show_prices and item.get('price'):
-                formatted_menu += f"  💰 ${item['price']:,}\n"
-            formatted_menu += "\n"
-            
-        return {
-            "type": "text_message",
-            "content": formatted_menu,
-            "parse_mode": "HTML"
-        }
-    except Exception as e:
-        return {"error": f"Error al enviar menú: {str(e)}"}
-
-@tool
 def send_order_summary(order_data: dict) -> dict:
     """
     Envía un resumen formateado del pedido.
@@ -1310,11 +1066,10 @@ def send_pdf_document(file_path: str = None, caption: str = None) -> dict:
 
 # Actualizar las listas de herramientas
 CUSTOMER_TOOLS = [get_client_by_id, update_client]
-ORDER_TOOLS = [create_order, update_order, delete_order, get_order_total, finish_order]
-PRODUCT_ORDER_TOOLS = [add_product_to_order, remove_product_from_order, update_product_in_order, calculate_order_total, get_order_details]
-SMART_PRODUCT_TOOLS = [add_product_to_order_smart, update_product_in_order_smart, get_border_price_by_name, get_adition_price_by_name]
+ORDER_TOOLS = [update_order_info, add_products_to_order, delete_order, get_order_total, finish_order, get_order_by_id]
+PRODUCT_ORDER_TOOLS = [remove_product_from_order, modify_product_from_order, calculate_order_total, get_order_details]
 MENU_TOOLS = [get_pizza_by_name, get_beverage_by_name, get_adition_by_name, get_border_by_name, get_combo_by_name, get_combos, get_borders, get_beverages]
-TELEGRAM_TOOLS = [send_image_message, send_inline_keyboard, send_menu_message, send_order_summary, send_pdf_document]
+TELEGRAM_TOOLS = [send_image_message, send_inline_keyboard, send_order_summary, send_pdf_document]
 
 # Complete tool list for the agent
-ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS + PRODUCT_ORDER_TOOLS + SMART_PRODUCT_TOOLS + TELEGRAM_TOOLS
+ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS + PRODUCT_ORDER_TOOLS + TELEGRAM_TOOLS
