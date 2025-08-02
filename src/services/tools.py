@@ -1069,7 +1069,7 @@ CUSTOMER_TOOLS = [get_client_by_id, update_client]
 ORDER_TOOLS = [update_order_info, add_products_to_order, delete_order, get_order_total, finish_order, get_order_by_id]
 PRODUCT_ORDER_TOOLS = [remove_product_from_order, modify_product_from_order, calculate_order_total, get_order_details]
 MENU_TOOLS = [get_pizza_by_name, get_beverage_by_name, get_adition_by_name, get_border_by_name, get_combo_by_name, get_combos, get_borders, get_beverages]
-TELEGRAM_TOOLS = [send_image_message, send_inline_keyboard, send_order_summary, send_pdf_document]
+SEND_TOOLS = [send_image_message, send_inline_keyboard, send_order_summary, send_pdf_document]
 
 # Complete tool list for the agent
-ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS + PRODUCT_ORDER_TOOLS + TELEGRAM_TOOLS
+ALL_TOOLS = CUSTOMER_TOOLS + MENU_TOOLS + ORDER_TOOLS + PRODUCT_ORDER_TOOLS + SEND_TOOLS

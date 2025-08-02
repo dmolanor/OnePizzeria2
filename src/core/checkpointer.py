@@ -143,8 +143,8 @@ class ChatStateManager:
             
             # Get active order if exists
             try:
-                from ..services.tools import get_active_order_by_client
-                active_order = get_active_order_by_client.invoke({"cliente_id": cliente_id})
+                from ..services.tools import get_order_by_id
+                active_order = get_order_by_id.invoke({"cliente_id": cliente_id})
             except (ImportError, Exception) as e:
                 print(f"Warning: Could not get active order: {e}")
                 active_order = None

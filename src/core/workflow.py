@@ -15,7 +15,7 @@ from src.core.checkpointer import state_manager
 from src.core.prompts import CustomerServicePrompts
 from src.core.state import ChatState, Order, ProductDetails
 from src.services.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS,
-                                ORDER_TOOLS, TELEGRAM_TOOLS, get_order_by_id)
+                                ORDER_TOOLS, SEND_TOOLS, get_order_by_id)
 
 
 class Workflow:
@@ -61,6 +61,7 @@ class Workflow:
             self.should_use_tools,
             {
                 "tools": "tools",
+                "retrieve": "retrieve_data",
                 "send": "send_response"
             }
         )
@@ -286,20 +287,23 @@ class Workflow:
         productos_pedido = active_order.get("productos", [])
         
         # Handle different intent types
-
+        
+        updated_state = state
+        
         #===CREAR PEDIDO===#    
         if section["intent"] == "crear_pedido":
             
             order_response = get_order_by_id.invoke({"cliente_id": cliente_id})
+            print(f"Order response: {order_response}")
             
             if hasattr(order_response, "success"):
                 print("🔄 Detected crear_pedido intent - order already exists in database")
-                updated_state = {"active_order": order_response}
+                updated_state["active_order"] = order_response.data
                 
-            elif hasattr(order_response, "fail"):
+            else:
                 print("🔄 Detected crear_pedido intent - order does not exist in database - creating new order in database")
-                new_order = supabase.table("pedidos_activos").insert({"cliente_id": cliente_id, "productos": [], "total": 0.0}).execute()
-                updated_state = {"active_order": new_order.data[0]}
+                new_order = supabase.table("pedidos_activos").insert({"cliente_id": cliente_id, "estado": "en curso", "productos": {}, "total": 0.0}).execute()
+                updated_state["active_order"] = new_order.data[0]
                         
         #===SELECCION DE PRODUCTOS===#
         elif section["intent"] == "seleccion_productos":
@@ -313,7 +317,7 @@ class Workflow:
             ]
             
             response = await self.llm.bind_tools(ORDER_TOOLS+MENU_TOOLS).ainvoke(product_context)
-            updated_state = {"messages": [response]}
+            updated_state["messages"] = [response]
             
             # Log tool usage for product selection
             if hasattr(response, "tool_calls") and response.tool_calls:
@@ -355,7 +359,7 @@ class Workflow:
             ]
             
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(personalization_context)
-            updated_state = {"messages": [response]}
+            updated_state["messages"] = [response]
             
             if hasattr(response, "tool_calls") and response.tool_calls:
                 print(f"🎨 PERSONALIZATION: {[tc['name'] for tc in response.tool_calls]}")
@@ -374,7 +378,7 @@ class Workflow:
             ]
             
             response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(modification_context)
-            updated_state = {"messages": [response]}
+            updated_state["messages"] = [response]
             
             if hasattr(response, "tool_calls") and response.tool_calls:
                 print(f"✏️ MODIFICATION: {[tc['name'] for tc in response.tool_calls]}")
@@ -426,37 +430,11 @@ class Workflow:
             # return {"messages": [response]}
             order_steps["seleccion_productos"] = 2
             
-            updated_state = {"order_steps": order_steps}
+            updated_state["order_steps"] = order_steps
         
         #===GENERAL===#
         else:
-            print(f"Sending enhanced prompt to LLM with tools...")
-            # Create context with enhanced instructions
-            context = [
-            SystemMessage(content=self.prompts.TOOLS_EXECUTION_SYSTEM),
-            HumanMessage(content=self.prompts.tools_execution_user(cliente_id, active_order.get("productos", []), section))
-            ]
-            response = await self.llm.bind_tools(ALL_TOOLS).ainvoke(context)
-            if hasattr(response.additional_kwargs, 'function'):
-                print(f"Response retrieve_data_step: {response.additional_kwargs['function']}")
-            updated_state = {"messages": list(state["messages"]) + [response]}
-            
-            # Check for tool calls
-            if hasattr(response, "tool_calls") and response.tool_calls:
-                print(f"🔧 USING TOOLS: {[tc['name'] for tc in response.tool_calls]}")
-                # Log the tool arguments for debugging
-                for tool_call in response.tool_calls:
-                    print(f"Tool: {tool_call['name']}, Args: {tool_call['args']}")
-                    
-                    # If it's a product search, we'll get the result and add to order
-                    if tool_call['name'] in ['get_pizza_by_name', 'get_beverage_by_name']:
-                        print(f"Product search detected, will add to order after tool execution")
-                    elif tool_call['name'] == 'create_order':
-                        print(f"🎯 Order creation detected - this will create pedido_activo")
-                    elif tool_call['name'] == 'get_order_by_id':
-                        print(f"🔍 Checking for existing active order")
-            else:
-                print("ℹ️  No tools called for this section")
+            print("ℹ️  No tools called for this section")
         
         # Preserve active_order in state
         updated_state["active_order"] = active_order
@@ -539,7 +517,7 @@ class Workflow:
                             order_steps["finalizacion"] = 2
                             print("✅ Order finalized - marking finalizacion as completed (2)")
                             # Clear active order since it's been finalized
-                            active_order_data = {
+                            active_order = {
                                 "order_id": "",
                                 "order_date": "",
                                 "order_total": 0.0,
@@ -614,7 +592,7 @@ class Workflow:
             print("✅ Products added - marking seleccion_productos as in progress (1)")
             
         return {
-            "active_order": active_order_data,
+            "active_order": active_order,
             "order_steps": order_steps,
             # Individual state fields for ChatState compatibility
             "saludo": order_steps.get("saludo", 0),
@@ -630,6 +608,8 @@ class Workflow:
     
     async def send_response_step(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Generate and format response to user."""
+        
+        print(f"=== SEND RESPONSE STEP ===")
         
         # Recupera el id de cliente y el último mensaje del state
         for msg in reversed(state["messages"]):
@@ -709,16 +689,41 @@ class Workflow:
                 )
             )
         
-        response = await self.llm.ainvoke(context)
+        response = await self.llm.bind_tools(SEND_TOOLS).ainvoke(context)
         
-        print(f"Response: {response.content}")
+        tool_results = []
+    
+        # Paso 2: Ejecutar tools directamente
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            for tool_call in response.tool_calls:
+                tool_name = tool_call["name"]
+                args = tool_call.get("args", {})
+                
+                # Busca la tool por nombre
+                tool = next((t for t in ALL_TOOLS if t.name == tool_name), None)
+                if tool:
+                    print(f"🔧 Ejecutando {tool_name} con args {args}")
+                    result = await tool.ainvoke(args)
+                    tool_results.append({"tool": tool_name, "result": result})
+        
+        # Paso 3: Decide si usar tool_results en respuesta final
+        if tool_results:
+            # Genera respuesta amigable
+            results_text = "\n".join(
+                [f"✅ {tr['tool']} ejecutada. Resultado: {tr['result']}" for tr in tool_results]
+            )
+            final_response = AIMessage(content=results_text)
+        else:
+            final_response = response
+        
+        print(f"Response: {final_response}")
         print(f"Final order states: {order_steps}")
         print(f"Next incomplete state: {next_incomplete_state}")
         
         # NOTE: Memory saving moved to dedicated final node
         
         # 🔄 PRESERVAR TODOS LOS MENSAJES: Históricos + respuesta actual
-        all_messages = messages + [response]  # Mantener historial completo + nueva respuesta
+        all_messages = messages + [final_response]  # Mantener historial completo + nueva respuesta
         
         return {
             "messages": all_messages,  # 📝 Todos los mensajes preservados
@@ -848,9 +853,13 @@ class Workflow:
 
     def should_use_tools(self, state: Dict[str, Any]) -> Literal["tools", "send"]:
         """Determine if we need to use tools based on the last message."""
+        
+        print(f"=== SHOULD USE TOOLS ===")
         messages = state.get("messages", [])
         if not messages:
             return "send"
+        
+        divided_message = state.get("divided_message", [])
         
         last_message = messages[-1]
         
@@ -860,7 +869,11 @@ class Workflow:
             return "tools"
         
         # No tools needed, go directly to response
-        print("No tools needed for this message")
+        elif divided_message:
+            print("More messages to process, continuing with retrieve_data...")
+            return "retrieve"
+        
+        print("No more messages to process, sending response...")
         return "send"
 
 

@@ -7,8 +7,6 @@ from config.settings import supabase
 from src.core.checkpointer import state_manager
 from src.core.prompts import CustomerServicePrompts
 from src.core.state import ChatState, Order, ProductDetails
-from src.services.tools import (ALL_TOOLS, CUSTOMER_TOOLS, MENU_TOOLS,
-                                ORDER_TOOLS, TELEGRAM_TOOLS)
 
 
 class Actions:
@@ -104,7 +102,7 @@ class Actions:
         """Build conversation context for LLM."""
         context = []
         
-        context.append(SystemMessage(content=self.prompts.answer_system()))
+        context.append(SystemMessage(content=self.prompts.answer_system(state)))
         cliente_id = state["cliente_id"]
         """
         context.append(
